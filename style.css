@@ -344,3 +344,31 @@ input[type="range"] {
     position: static;
   }
 }
+
+.credit-badge {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 6px;
+  background: rgba(29, 32, 38, 0.85);
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  backdrop-filter: blur(6px);
+  z-index: 10;
+}
+
+.credit-badge img {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+}
+
+.credit-badge span {
+  font-size: 13px;
+  color: var(--text-dim);
+}
