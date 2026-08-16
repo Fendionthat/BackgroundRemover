@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Background Remover &amp; Touch-Up</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-32.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="theme-color" content="#14161a">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>Background Remover <span>+ Touch-Up</span></h1>
+  <p id="status" class="status">Choose an image to get started.</p>
+</header>
+
+<main class="app">
+  <aside class="sidebar">
+    <section class="panel">
+      <h2>1. Image</h2>
+      <label class="file-btn">
+        Choose Image
+        <input type="file" id="fileInput" accept="image/*" hidden>
+      </label>
+      <button id="removeBgBtn" class="primary" disabled>Remove Background</button>
+      <div class="progress-wrap" id="progressWrap" hidden>
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="toolPanel" hidden>
+      <h2>2. Touch Up</h2>
+      <div class="tool-toggle">
+        <button class="tool-btn active" id="eraseToolBtn" data-tool="erase">Erase</button>
+        <button class="tool-btn" id="restoreToolBtn" data-tool="restore">Restore</button>
+      </div>
+      <p class="hint">Erase paints transparent. Restore is a smart "magic wand" — touch a spot and it grows through connected, similarly-colored pixels (great for filling back a whole wall or sky in one go).</p>
+
+      <label class="slider-label">Brush size <span id="brushSizeVal">40</span>px</label>
+      <input type="range" id="brushSize" min="4" max="200" value="40">
+
+      <label class="slider-label">Erase softness <span id="softnessVal">50</span>%</label>
+      <input type="range" id="softness" min="0" max="100" value="50">
+
+      <label class="slider-label">Restore tolerance <span id="toleranceVal">12</span>%</label>
+      <input type="range" id="tolerance" min="0" max="100" value="12">
+
+      <details class="explain">
+        <summary>What do these mean?</summary>
+        <dl>
+          <dt>Brush size</dt>
+          <dd>How big an area each click/drag touches. For Restore, this is the size of the starting spot — it can still grow much bigger from there.</dd>
+          <dt>Erase softness</dt>
+          <dd>How feathered the erase edge is. 0% is a hard-edged cut; higher values fade out gradually, which blends better with soft/blurry edges like hair or fur.</dd>
+          <dt>Restore tolerance</dt>
+          <dd>How different two neighboring pixels can be and still count as "the same area." Low tolerance only fills near-identical color (safer, stays inside real edges). High tolerance spreads more freely across shading and gradients, but risks leaking into the subject.</dd>
+        </dl>
+      </details>
+
+      <div class="btn-row">
+        <button id="undoBtn" disabled>Undo</button>
+        <button id="redoBtn" disabled>Redo</button>
+      </div>
+      <button id="resetBtn">Reset to AI Result</button>
+    </section>
+
+    <section class="panel" id="exportPanel" hidden>
+      <h2>3. Export</h2>
+      <button id="downloadBtn" class="primary">Download PNG</button>
+      <button id="newImageBtn">Start Over With New Image</button>
+    </section>
+  </aside>
+
+  <section class="canvas-area">
+    <div class="canvas-viewport" id="canvasViewport">
+      <div class="canvas-wrap" id="canvasWrap">
+        <div class="dropzone" id="dropzone">
+          <p>Drop an image here<br><span>or use "Choose Image"</span></p>
+        </div>
+        <canvas id="workingCanvas"></canvas>
+        <div class="brush-cursor" id="brushCursor" hidden></div>
+      </div>
+      <button class="zoom-indicator" id="zoomIndicator" title="Scroll to zoom. Click to reset to fit." hidden>100%</button>
+    </div>
+  </section>
+</main>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
