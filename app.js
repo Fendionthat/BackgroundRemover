@@ -1,4 +1,4 @@
-import { removeBackground } from "https://esm.sh/@imgly/background-removal@1.5.7";
+import { removeBackground } from "./vendor/background-removal.bundle.mjs";
 
 const MAX_DIM = 1600;
 const UNDO_LIMIT = 15;
@@ -155,6 +155,7 @@ removeBgBtn.addEventListener("click", async () => {
     );
 
     const resultBlob = await removeBackground(sourceBlob, {
+      publicPath: new URL("./vendor/model-data/", import.meta.url).toString(),
       progress: (key, current, total) => {
         if (total) {
           const pct = Math.round((current / total) * 100);
