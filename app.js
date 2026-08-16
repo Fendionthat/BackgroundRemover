@@ -10,7 +10,9 @@ const progressBar = document.getElementById("progressBar");
 const toolPanel = document.getElementById("toolPanel");
 const exportPanel = document.getElementById("exportPanel");
 const eraseToolBtn = document.getElementById("eraseToolBtn");
+const magicEraseToolBtn = document.getElementById("magicEraseToolBtn");
 const restoreToolBtn = document.getElementById("restoreToolBtn");
+const toolHint = document.getElementById("toolHint");
 const brushSizeInput = document.getElementById("brushSize");
 const brushSizeVal = document.getElementById("brushSizeVal");
 const softnessInput = document.getElementById("softness");
@@ -176,7 +178,7 @@ removeBgBtn.addEventListener("click", async () => {
     exportPanel.hidden = false;
     updateUndoRedoButtons();
     applyZoom();
-    setStatus('Background removed. Use "Erase" to clean up leftovers or "Restore" to bring parts back.');
+    setStatus('Background removed. Use "Magic Erase" to clear out leftover background in one click, "Erase" for freehand cleanup, or "Restore" to bring parts back.');
   } catch (err) {
     console.error(err);
     setStatus("Something went wrong removing the background: " + err.message);
@@ -189,12 +191,21 @@ removeBgBtn.addEventListener("click", async () => {
 
 // ---------- Tools ----------
 
+const TOOL_HINTS = {
+  erase: "Erase paints transparent with a soft brush — good for freehand cleanup.",
+  magicErase: 'Magic Erase: click a background area to remove the whole connected same-color region. Stops at outlines, so matching colors on the subject (like white-on-white) are safe.',
+  restore: 'Restore: click an erased area to bring back the whole connected same-color region from the original image.',
+};
+
 function setTool(tool) {
   currentTool = tool;
   eraseToolBtn.classList.toggle("active", tool === "erase");
+  magicEraseToolBtn.classList.toggle("active", tool === "magicErase");
   restoreToolBtn.classList.toggle("active", tool === "restore");
+  toolHint.textContent = TOOL_HINTS[tool];
 }
 eraseToolBtn.addEventListener("click", () => setTool("erase"));
+magicEraseToolBtn.addEventListener("click", () => setTool("magicErase"));
 restoreToolBtn.addEventListener("click", () => setTool("restore"));
 
 brushSizeInput.addEventListener("input", () => {
@@ -231,10 +242,11 @@ function getCanvasPoint(evt) {
 
 // Flood-fills outward from a brush-sized seed disc through pixels of the
 // *original* image that are connected and color-similar (neighbor-to-neighbor,
-// within `tolerance`), restoring each matched pixel into strokeImageData.
+// within `tolerance`). `erase` selects the action on each matched pixel:
+// true clears it to transparent, false restores it from the original image.
 // Returns the touched bounding box (for a cheap partial putImageData), or
 // null if the seed was entirely out of bounds / already filled.
-function smartRestoreStamp(cx, cy) {
+function floodFillStamp(cx, cy, erase) {
   if (!strokeImageData || !originalImageData) return null;
   const w = workingCanvas.width;
   const h = workingCanvas.height;
@@ -255,13 +267,21 @@ function smartRestoreStamp(cx, cy) {
   const seedMinY = Math.max(0, Math.floor(cy - r));
   const seedMaxY = Math.min(h - 1, Math.ceil(cy + r));
 
-  const copyPixel = (idx) => {
-    const p = idx * 4;
-    buf[p] = orig[p];
-    buf[p + 1] = orig[p + 1];
-    buf[p + 2] = orig[p + 2];
-    buf[p + 3] = orig[p + 3];
-  };
+  const copyPixel = erase
+    ? (idx) => {
+        const p = idx * 4;
+        buf[p] = 0;
+        buf[p + 1] = 0;
+        buf[p + 2] = 0;
+        buf[p + 3] = 0;
+      }
+    : (idx) => {
+        const p = idx * 4;
+        buf[p] = orig[p];
+        buf[p + 1] = orig[p + 1];
+        buf[p + 2] = orig[p + 2];
+        buf[p + 3] = orig[p + 3];
+      };
 
   for (let y = seedMinY; y <= seedMaxY; y++) {
     for (let x = seedMinX; x <= seedMaxX; x++) {
@@ -357,7 +377,7 @@ function stampBrush(x, y) {
     ctxWorking.drawImage(brushCanvas, x - r, y - r);
     ctxWorking.globalCompositeOperation = "source-over";
   } else {
-    const dirty = smartRestoreStamp(Math.round(x), Math.round(y));
+    const dirty = floodFillStamp(Math.round(x), Math.round(y), currentTool === "magicErase");
     if (dirty) {
       ctxWorking.putImageData(strokeImageData, 0, 0, dirty.x, dirty.y, dirty.w, dirty.h);
     }
@@ -404,7 +424,7 @@ workingCanvas.addEventListener("pointerdown", (e) => {
   pushUndo();
   isDrawing = true;
   lastPoint = null;
-  if (currentTool === "restore") {
+  if (currentTool === "magicErase" || currentTool === "restore") {
     strokeImageData = ctxWorking.getImageData(0, 0, workingCanvas.width, workingCanvas.height);
   }
   const p = getCanvasPoint(e);

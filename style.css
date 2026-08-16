@@ -244,6 +244,7 @@ input[type="range"] {
 .canvas-wrap {
   position: relative;
   max-width: 100%;
+  min-height: 62vh;
   max-height: 78vh;
   border-radius: var(--radius);
   overflow: auto;
@@ -267,23 +268,30 @@ input[type="range"] {
 
 .dropzone {
   position: absolute;
-  inset: 0;
+  inset: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;
   color: var(--text-dim);
-  font-size: 15px;
-  min-height: 320px;
+  font-size: 20px;
+  border: 2px dashed var(--panel-border);
+  border-radius: var(--radius);
   pointer-events: none;
+  transition: border-color 0.15s, color 0.15s;
 }
 
 .dropzone span {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .canvas-wrap.drag-over {
   border-color: var(--accent);
+}
+
+.canvas-wrap.drag-over .dropzone {
+  border-color: var(--accent);
+  color: var(--text);
 }
 
 .zoom-indicator {
