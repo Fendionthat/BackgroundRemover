@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Icon Builder</title>
+<style>
+  body { background: #14161a; color: #e8eaed; font-family: sans-serif; padding: 24px; }
+  canvas { border: 1px solid #2b2f38; border-radius: 8px; margin: 8px; background: repeating-conic-gradient(#222 0% 25%, #2a2a2a 0% 50%) 0 0/20px 20px; }
+  a { display: inline-block; margin: 4px 8px 16px 0; color: #22d3ee; }
+</style>
+</head>
+<body>
+<h2>Icon Builder</h2>
+<p>Regenerates icons/icon-{32,192,512}.png from icons/cirno-source.png. Open this file via the local server (not file://), then click each download link.</p>
+<div id="out"></div>
+<script>
+const SOURCE = "../icons/cirno-source.png";
+
+function render(bmp, SIZE) {
+  const c = document.createElement("canvas");
+  c.width = SIZE; c.height = SIZE;
+  const ctx = c.getContext("2d");
+  const s = SIZE / 512;
+
+  ctx.beginPath();
+  ctx.roundRect(0, 0, SIZE, SIZE, 96 * s);
+  ctx.clip();
+
+  const grad = ctx.createLinearGradient(0, 0, 0, SIZE);
+  grad.addColorStop(0, "#0c1830");
+  grad.addColorStop(1, "#050a16");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, SIZE, SIZE);
+
+  const glow = ctx.createRadialGradient(SIZE * 0.5, SIZE * 0.36, 10 * s, SIZE * 0.5, SIZE * 0.36, SIZE * 0.5);
+  glow.addColorStop(0, "rgba(34,211,238,0.35)");
+  glow.addColorStop(1, "rgba(34,211,238,0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, SIZE, SIZE);
+
+  const targetW = 400 * s;
+  const targetH = targetW * (bmp.height / bmp.width);
+  const dx = (SIZE - targetW) / 2;
+  const dy = 30 * s;
+  ctx.drawImage(bmp, dx, dy, targetW, targetH);
+
+  ctx.textAlign = "center";
+  ctx.font = `800 ${118 * s}px 'Segoe UI', Arial, sans-serif`;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText("B", 200 * s, 470 * s);
+  ctx.fillStyle = "#22d3ee";
+  ctx.fillText("R", 314 * s, 470 * s);
+
+  return c;
+}
+
+(async () => {
+  const resp = await fetch(SOURCE);
+  const blob = await resp.blob();
+  const bmp = await createImageBitmap(blob);
+  const out = document.getElementById("out");
+
+  for (const size of [512, 192, 32]) {
+    const canvas = render(bmp, size);
+    out.appendChild(canvas);
+    const a = document.createElement("a");
+    a.textContent = `Download icon-${size}.png`;
+    canvas.toBlob((blob) => {
+      a.href = URL.createObjectURL(blob);
+      a.download = `icon-${size}.png`;
+    }, "image/png");
+    out.appendChild(a);
+    out.appendChild(document.createElement("br"));
+  }
+})();
+</script>
+</body>
+</html>

@@ -5,8 +5,9 @@ A background remover that runs entirely in your browser — no server, no API ke
 ## Features
 
 - **One-click background removal**, powered by [`@imgly/background-removal`](https://github.com/imgly/background-removal-js), an ONNX/WASM segmentation model that runs client-side. The library and the model weights (~95MB) are vendored directly in this repo under `vendor/` — nothing is fetched from a CDN at runtime, so this keeps working regardless of what happens to any third-party service, indefinitely.
-- **Erase brush** — paint transparent, with adjustable size and edge softness (feathering).
-- **Restore brush** — a "magic wand": touch a spot and it flood-fills outward through connected, similarly-colored original pixels. Touch a plain wall or sky and the whole area comes back in one stroke; it stops on its own at real edges. Tolerance is adjustable.
+- **Erase** and **Restore**, each with two modes:
+  - **Brush** — paints exactly where you drag. Precise, freehand.
+  - **Magic Wand** — click once and it flood-fills outward through connected, similarly-colored original pixels, stopping at outlines. Great for flat-color backgrounds; switch back to Brush for spots where the wand grabs more than you want (e.g. two same-colored areas that turn out to be touching).
 - **Scroll-wheel zoom** with pan, anchored to the cursor, for pixel-level touch-ups.
 - **Undo/redo**, reset-to-AI-result, and PNG export.
 - Installable as a desktop app (see below) — no browser tabs or address bar.
@@ -46,14 +47,19 @@ style.css                # styling
 app.js                   # all app logic
 manifest.json             # PWA manifest (installable, app icon/name)
 Launch BG Remover.vbs      # starts the server + opens the app window
-icons/                    # generated app icons (PNG + Windows .ico)
-scripts/gen_icon.py        # regenerates icons/icon-*.png (no dependencies)
-scripts/gen_ico.py         # packs those PNGs into icons/app.ico
+icons/                    # app icons (PNG + Windows .ico) and their source art
+  cirno-source.png                # the artwork the icon is built from
+  icon-32/192/512.png             # generated icon sizes
+  app.ico                         # Windows shortcut icon, packed from the PNGs above
+scripts/build-icon.html    # regenerates icon-*.png from icons/cirno-source.png (open via the local server)
+scripts/gen_ico.py         # packs icon-*.png into icons/app.ico
 vendor/                   # vendored background-removal library + model weights (~95MB, no CDN dependency)
   background-removal.bundle.mjs   # the library, fully self-contained
   shims/                          # small Node.js API shims the library needs in-browser
   model-data/                     # ONNX model + ONNX Runtime WASM, split into chunk files
 ```
+
+To change the icon artwork: replace `icons/cirno-source.png`, open `http://localhost:8000/scripts/build-icon.html`, download the three regenerated sizes into `icons/`, then run `python scripts/gen_ico.py` to rebuild `app.ico`.
 
 ### Why the model is vendored instead of loaded from a CDN
 
@@ -61,9 +67,9 @@ By default this library fetches its ONNX model and WASM runtime from IMG.LY's CD
 
 If you ever want a smaller or larger model variant (`isnet_quint8` / `isnet`), or GPU (WebGPU) execution, you'd need to fetch those additional files the same way and add a `model`/`device` option to the `removeBackground()` call in `app.js`.
 
-## How the Restore "magic wand" works
+## How Magic Wand mode works
 
-Restore doesn't just copy pixels under the brush. On click/drag it seeds a small area at the brush position, then does a flood fill: each neighboring pixel in the *original* image is compared to its already-filled neighbor, and included if the color difference is within the Tolerance setting. This lets it walk through gradual shading (a wall, a sky) while still stopping at genuine edges (a difference too large to be the same surface).
+On click/drag it seeds a small area at the brush position, then flood-fills outward: each candidate pixel in the *original* image is compared against the exact color of the pixel you clicked (not against whatever neighbor reached it — comparing to the neighbor would let the fill "creep" across a gradual anti-aliased edge one small step at a time, even between two colors that are nothing alike overall). A pixel joins the fill only while its color stays within Tolerance of that original click point, so it stops precisely where the cumulative difference gets too large — the same approach real magic-wand tools use to avoid leaking past soft edges.
 
 ## Credits
 
