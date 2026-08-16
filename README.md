@@ -74,3 +74,7 @@ On click/drag it seeds a small area at the brush position, then flood-fills outw
 ## Credits
 
 Background segmentation by [IMG.LY's `@imgly/background-removal`](https://github.com/imgly/background-removal-js) (vendored in `vendor/`) — check their repo for its license terms if you plan to use this beyond personal use.
+
+## License
+
+See [LICENSE](LICENSE). You're welcome to download, run, and modify this for your own personal use — republishing/redistributing it (as-is or modified) or claiming authorship isn't permitted.

@@ -11,7 +11,7 @@
 </head>
 <body>
 <h2>Icon Builder</h2>
-<p>Regenerates icons/icon-{32,192,512}.png from icons/cirno-source.png. Open this file via the local server (not file://), then click each download link.</p>
+<p>Regenerates the web favicon sizes (icon-32/192/512.png) and the Windows .ico source sizes (ico-16/48/256.png) from icons/cirno-source.png. Open this file via the local server (not file://), download each, then run <code>python scripts/gen_ico.py</code> to rebuild app.ico from the ico-* set.</p>
 <div id="out"></div>
 <script>
 const SOURCE = "../icons/cirno-source.png";
@@ -44,12 +44,14 @@ function render(bmp, SIZE) {
   const dy = 30 * s;
   ctx.drawImage(bmp, dx, dy, targetW, targetH);
 
-  ctx.textAlign = "center";
-  ctx.font = `800 ${118 * s}px 'Segoe UI', Arial, sans-serif`;
-  ctx.fillStyle = "#ffffff";
-  ctx.fillText("B", 200 * s, 470 * s);
-  ctx.fillStyle = "#22d3ee";
-  ctx.fillText("R", 314 * s, 470 * s);
+  if (SIZE >= 48) {
+    ctx.textAlign = "center";
+    ctx.font = `800 ${118 * s}px 'Segoe UI', Arial, sans-serif`;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText("B", 200 * s, 470 * s);
+    ctx.fillStyle = "#22d3ee";
+    ctx.fillText("R", 314 * s, 470 * s);
+  }
 
   return c;
 }
@@ -60,14 +62,23 @@ function render(bmp, SIZE) {
   const bmp = await createImageBitmap(blob);
   const out = document.getElementById("out");
 
-  for (const size of [512, 192, 32]) {
+  const targets = [
+    { size: 512, name: "icon-512.png" },
+    { size: 192, name: "icon-192.png" },
+    { size: 32, name: "icon-32.png" },
+    { size: 256, name: "ico-256.png" },
+    { size: 48, name: "ico-48.png" },
+    { size: 16, name: "ico-16.png" },
+  ];
+
+  for (const { size, name } of targets) {
     const canvas = render(bmp, size);
     out.appendChild(canvas);
     const a = document.createElement("a");
-    a.textContent = `Download icon-${size}.png`;
+    a.textContent = `Download ${name}`;
     canvas.toBlob((blob) => {
       a.href = URL.createObjectURL(blob);
-      a.download = `icon-${size}.png`;
+      a.download = name;
     }, "image/png");
     out.appendChild(a);
     out.appendChild(document.createElement("br"));

@@ -1,6 +1,9 @@
-"""Packs icons/icon-32.png, icon-192.png and icon-512.png into icons/app.ico
-(modern ICO format with embedded PNG frames, supported since Windows Vista).
-Run after gen_icon.py:
+"""Packs icons/ico-16/48/256.png into icons/app.ico (modern ICO format with
+embedded PNG frames, supported since Windows Vista). These are Windows'
+own conventional shell-icon sizes -- separate from icon-32/192/512.png,
+which are the web favicon/PWA sizes. Both sets are rendered from
+icons/cirno-source.png via scripts/build-icon.html.
+Run:
     python scripts/gen_ico.py
 """
 import os
@@ -8,13 +11,13 @@ import struct
 
 HERE = os.path.dirname(__file__)
 ICONS_DIR = os.path.join(HERE, "..", "icons")
-SIZES = [32, 192, 512]
+SIZES = [16, 48, 256]
 
 
 def build_ico():
     frames = []
     for size in SIZES:
-        with open(os.path.join(ICONS_DIR, f"icon-{size}.png"), "rb") as f:
+        with open(os.path.join(ICONS_DIR, f"ico-{size}.png"), "rb") as f:
             frames.append(f.read())
 
     num = len(frames)
