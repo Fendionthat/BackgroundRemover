@@ -260,12 +260,17 @@ function getCanvasPoint(evt) {
   };
 }
 
-// Flood-fills outward from a brush-sized seed disc through pixels of the
-// *original* image that are connected and color-similar (neighbor-to-neighbor,
-// within `tolerance`). `erase` selects the action on each matched pixel:
-// true clears it to transparent, false restores it from the original image.
-// Returns the touched bounding box (for a cheap partial putImageData), or
-// null if the seed was entirely out of bounds / already filled.
+// Flood-fills outward from a click point through pixels of the *original*
+// image that are connected and color-similar *to the clicked pixel* (every
+// candidate is compared against that one fixed reference color, not against
+// whatever neighbor reached it — comparing to the neighbor instead would let
+// the fill "creep" across a gradual anti-aliased edge one small step at a
+// time, even between two colors that are nothing alike overall, e.g. black
+// hair bleeding into a skin-tone face through the soft edge between them).
+// `erase` selects the action on each matched pixel: true clears it to
+// transparent, false restores it from the original image. Returns the
+// touched bounding box (for a cheap partial putImageData), or null if
+// nothing matched.
 function floodFillStamp(cx, cy, erase) {
   if (!strokeImageData || !originalImageData) return null;
   const w = workingCanvas.width;
@@ -274,6 +279,13 @@ function floodFillStamp(cx, cy, erase) {
   const orig = originalImageData.data;
   const r = brushSize;
   const tol = tolerance;
+
+  const seedX = Math.min(w - 1, Math.max(0, Math.round(cx)));
+  const seedY = Math.min(h - 1, Math.max(0, Math.round(cy)));
+  const seedP = (seedY * w + seedX) * 4;
+  const refR = orig[seedP], refG = orig[seedP + 1], refB = orig[seedP + 2];
+  const matches = (p) =>
+    Math.max(Math.abs(orig[p] - refR), Math.abs(orig[p + 1] - refG), Math.abs(orig[p + 2] - refB)) <= tol;
 
   fillGen++;
   const gen = fillGen;
@@ -310,6 +322,7 @@ function floodFillStamp(cx, cy, erase) {
       const idx = y * w + x;
       if (fillVisited[idx] === gen) continue;
       fillVisited[idx] = gen;
+      if (!matches(idx * 4)) continue;
       copyPixel(idx);
       stackX.push(x);
       stackY.push(y);
@@ -324,16 +337,13 @@ function floodFillStamp(cx, cy, erase) {
     const x = stackX.pop();
     const y = stackY.pop();
     const idx = y * w + x;
-    const p = idx * 4;
-    const or_ = orig[p], og = orig[p + 1], ob = orig[p + 2];
 
     // 4-connected neighbors, inlined for hot-loop performance
     if (x > 0) {
       const nidx = idx - 1;
       if (fillVisited[nidx] !== gen) {
         fillVisited[nidx] = gen;
-        const np = nidx * 4;
-        if (Math.max(Math.abs(orig[np] - or_), Math.abs(orig[np + 1] - og), Math.abs(orig[np + 2] - ob)) <= tol) {
+        if (matches(nidx * 4)) {
           copyPixel(nidx);
           stackX.push(x - 1); stackY.push(y);
           if (x - 1 < minX) minX = x - 1;
@@ -346,8 +356,7 @@ function floodFillStamp(cx, cy, erase) {
       const nidx = idx + 1;
       if (fillVisited[nidx] !== gen) {
         fillVisited[nidx] = gen;
-        const np = nidx * 4;
-        if (Math.max(Math.abs(orig[np] - or_), Math.abs(orig[np + 1] - og), Math.abs(orig[np + 2] - ob)) <= tol) {
+        if (matches(nidx * 4)) {
           copyPixel(nidx);
           stackX.push(x + 1); stackY.push(y);
           if (x + 1 > maxX) maxX = x + 1;
@@ -360,8 +369,7 @@ function floodFillStamp(cx, cy, erase) {
       const nidx = idx - w;
       if (fillVisited[nidx] !== gen) {
         fillVisited[nidx] = gen;
-        const np = nidx * 4;
-        if (Math.max(Math.abs(orig[np] - or_), Math.abs(orig[np + 1] - og), Math.abs(orig[np + 2] - ob)) <= tol) {
+        if (matches(nidx * 4)) {
           copyPixel(nidx);
           stackX.push(x); stackY.push(y - 1);
           if (x < minX) minX = x;
@@ -374,8 +382,7 @@ function floodFillStamp(cx, cy, erase) {
       const nidx = idx + w;
       if (fillVisited[nidx] !== gen) {
         fillVisited[nidx] = gen;
-        const np = nidx * 4;
-        if (Math.max(Math.abs(orig[np] - or_), Math.abs(orig[np + 1] - og), Math.abs(orig[np + 2] - ob)) <= tol) {
+        if (matches(nidx * 4)) {
           copyPixel(nidx);
           stackX.push(x); stackY.push(y + 1);
           if (x < minX) minX = x;
