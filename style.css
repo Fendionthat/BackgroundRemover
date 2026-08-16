@@ -148,6 +148,22 @@ button + button {
   margin-bottom: 10px;
 }
 
+.mode-toggle {
+  margin-bottom: 4px;
+}
+
+.mode-toggle .tool-btn {
+  font-size: 13px;
+  padding: 7px 10px;
+  background: transparent;
+}
+
+.mode-toggle .tool-btn.active {
+  background: #2a2f3a;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .tool-btn {
   flex: 1;
   margin: 0;

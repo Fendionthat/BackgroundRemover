@@ -10,9 +10,12 @@ const progressBar = document.getElementById("progressBar");
 const toolPanel = document.getElementById("toolPanel");
 const exportPanel = document.getElementById("exportPanel");
 const eraseToolBtn = document.getElementById("eraseToolBtn");
-const magicEraseToolBtn = document.getElementById("magicEraseToolBtn");
 const restoreToolBtn = document.getElementById("restoreToolBtn");
+const brushModeBtn = document.getElementById("brushModeBtn");
+const magicModeBtn = document.getElementById("magicModeBtn");
 const toolHint = document.getElementById("toolHint");
+const softnessRow = document.getElementById("softnessRow");
+const toleranceRow = document.getElementById("toleranceRow");
 const brushSizeInput = document.getElementById("brushSize");
 const brushSizeVal = document.getElementById("brushSizeVal");
 const softnessInput = document.getElementById("softness");
@@ -38,9 +41,10 @@ const originalCanvas = document.createElement("canvas");
 const ctxOriginal = originalCanvas.getContext("2d", { willReadFrequently: true });
 
 let currentTool = "erase";
+let magicMode = false;
 let brushSize = 40;
 let softness = 0.5;
-let tolerance = 31; // matches the tolerance slider's default (12%) of 255
+let tolerance = 20; // matches the tolerance slider's default (8%) of 255
 let isDrawing = false;
 let lastPoint = null;
 let undoStack = [];
@@ -178,7 +182,7 @@ removeBgBtn.addEventListener("click", async () => {
     exportPanel.hidden = false;
     updateUndoRedoButtons();
     applyZoom();
-    setStatus('Background removed. Use "Magic Erase" to clear out leftover background in one click, "Erase" for freehand cleanup, or "Restore" to bring parts back.');
+    setStatus('Background removed. Pick Erase or Restore, then Brush (precise) or Magic Wand (click a whole same-color area) below.');
   } catch (err) {
     console.error(err);
     setStatus("Something went wrong removing the background: " + err.message);
@@ -192,21 +196,37 @@ removeBgBtn.addEventListener("click", async () => {
 // ---------- Tools ----------
 
 const TOOL_HINTS = {
-  erase: "Erase paints transparent with a soft brush — good for freehand cleanup.",
-  magicErase: 'Magic Erase: click a background area to remove the whole connected same-color region. Stops at outlines, so matching colors on the subject (like white-on-white) are safe.',
-  restore: 'Restore: click an erased area to bring back the whole connected same-color region from the original image.',
+  "erase-brush": "Erase paints transparent wherever you drag — precise, freehand cleanup.",
+  "erase-magic": "Magic Erase: click a background area to remove the whole connected same-color region. Stops at outlines, so matching colors on the subject (like white-on-white) are safe — but connected same-color areas with no outline between them (e.g. a skirt and shirt of the same white) will go together. Switch to Brush for precise control.",
+  "restore-brush": "Restore paints back the original image wherever you drag — precise, freehand.",
+  "restore-magic": "Magic Restore: click an erased area to bring back the whole connected same-color region from the original image.",
 };
+
+function updateToolUI() {
+  eraseToolBtn.classList.toggle("active", currentTool === "erase");
+  restoreToolBtn.classList.toggle("active", currentTool === "restore");
+  brushModeBtn.classList.toggle("active", !magicMode);
+  magicModeBtn.classList.toggle("active", magicMode);
+  softnessRow.hidden = magicMode;
+  softnessInput.hidden = magicMode;
+  toleranceRow.hidden = !magicMode;
+  toleranceInput.hidden = !magicMode;
+  toolHint.textContent = TOOL_HINTS[`${currentTool}-${magicMode ? "magic" : "brush"}`];
+}
 
 function setTool(tool) {
   currentTool = tool;
-  eraseToolBtn.classList.toggle("active", tool === "erase");
-  magicEraseToolBtn.classList.toggle("active", tool === "magicErase");
-  restoreToolBtn.classList.toggle("active", tool === "restore");
-  toolHint.textContent = TOOL_HINTS[tool];
+  updateToolUI();
+}
+function setMode(magic) {
+  magicMode = magic;
+  updateToolUI();
 }
 eraseToolBtn.addEventListener("click", () => setTool("erase"));
-magicEraseToolBtn.addEventListener("click", () => setTool("magicErase"));
 restoreToolBtn.addEventListener("click", () => setTool("restore"));
+brushModeBtn.addEventListener("click", () => setMode(false));
+magicModeBtn.addEventListener("click", () => setMode(true));
+updateToolUI();
 
 brushSizeInput.addEventListener("input", () => {
   brushSize = Number(brushSizeInput.value);
@@ -372,15 +392,26 @@ function floodFillStamp(cx, cy, erase) {
 
 function stampBrush(x, y) {
   const r = brushSize;
-  if (currentTool === "erase") {
+  if (magicMode) {
+    const dirty = floodFillStamp(Math.round(x), Math.round(y), currentTool === "erase");
+    if (dirty) {
+      ctxWorking.putImageData(strokeImageData, 0, 0, dirty.x, dirty.y, dirty.w, dirty.h);
+    }
+  } else if (currentTool === "erase") {
     ctxWorking.globalCompositeOperation = "destination-out";
     ctxWorking.drawImage(brushCanvas, x - r, y - r);
     ctxWorking.globalCompositeOperation = "source-over";
   } else {
-    const dirty = floodFillStamp(Math.round(x), Math.round(y), currentTool === "magicErase");
-    if (dirty) {
-      ctxWorking.putImageData(strokeImageData, 0, 0, dirty.x, dirty.y, dirty.w, dirty.h);
-    }
+    // brush restore: feathered copy of the original image within the brush circle
+    const size = Math.ceil(r * 2);
+    const tmp = document.createElement("canvas");
+    tmp.width = size;
+    tmp.height = size;
+    const tctx = tmp.getContext("2d");
+    tctx.drawImage(originalCanvas, x - r, y - r, size, size, 0, 0, size, size);
+    tctx.globalCompositeOperation = "destination-in";
+    tctx.drawImage(brushCanvas, 0, 0);
+    ctxWorking.drawImage(tmp, x - r, y - r);
   }
 }
 
@@ -424,7 +455,7 @@ workingCanvas.addEventListener("pointerdown", (e) => {
   pushUndo();
   isDrawing = true;
   lastPoint = null;
-  if (currentTool === "magicErase" || currentTool === "restore") {
+  if (magicMode) {
     strokeImageData = ctxWorking.getImageData(0, 0, workingCanvas.width, workingCanvas.height);
   }
   const p = getCanvasPoint(e);

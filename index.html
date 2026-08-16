@@ -34,35 +34,38 @@
       <h2>2. Touch Up</h2>
       <div class="tool-toggle">
         <button class="tool-btn active" id="eraseToolBtn" data-tool="erase">Erase</button>
-        <button class="tool-btn" id="magicEraseToolBtn" data-tool="magicErase">Magic Erase</button>
         <button class="tool-btn" id="restoreToolBtn" data-tool="restore">Restore</button>
+      </div>
+      <div class="tool-toggle mode-toggle">
+        <button class="tool-btn active" id="brushModeBtn" data-mode="brush">Brush</button>
+        <button class="tool-btn" id="magicModeBtn" data-mode="magic">Magic Wand</button>
       </div>
       <p class="hint" id="toolHint">Erase paints transparent with a soft brush — good for freehand cleanup.</p>
 
       <label class="slider-label">Brush size <span id="brushSizeVal">40</span>px</label>
       <input type="range" id="brushSize" min="4" max="200" value="40">
 
-      <label class="slider-label">Erase softness <span id="softnessVal">50</span>%</label>
+      <label class="slider-label" id="softnessRow">Softness <span id="softnessVal">50</span>%</label>
       <input type="range" id="softness" min="0" max="100" value="50">
 
-      <label class="slider-label">Magic wand tolerance <span id="toleranceVal">12</span>%</label>
-      <input type="range" id="tolerance" min="0" max="100" value="12">
+      <label class="slider-label" id="toleranceRow">Magic wand tolerance <span id="toleranceVal">8</span>%</label>
+      <input type="range" id="tolerance" min="0" max="100" value="8">
 
       <details class="explain">
         <summary>What do these mean?</summary>
         <dl>
-          <dt>Erase</dt>
-          <dd>A soft brush that paints transparent wherever you drag. Good for freehand touch-ups that don't follow a clean edge.</dd>
-          <dt>Magic Erase</dt>
-          <dd>Click once on a background area and it removes that whole connected area of similar color — stopping at outlines. Perfect for flat-color backgrounds (like line art or illustrations) where the subject has matching colors (e.g. white clothing on a white background): since the outline separates them, only the background side gets erased.</dd>
-          <dt>Restore</dt>
-          <dd>The same idea as Magic Erase, but brings pixels back from the original image instead of removing them — for parts the AI erased by mistake.</dd>
+          <dt>Erase / Restore</dt>
+          <dd>Erase paints transparent; Restore brings pixels back from the original image. Both work in either Brush or Magic Wand mode below.</dd>
+          <dt>Brush mode</dt>
+          <dd>Paints exactly where you drag, nothing more. Good for freehand touch-ups, or for precise spots where Magic Wand grabs too much (e.g. two same-color areas that turn out to be touching, like a skirt and shirt of the same white).</dd>
+          <dt>Magic Wand mode</dt>
+          <dd>Click once and it grows through the whole connected area of similar color, stopping at outlines. Great for flat-color art — but if two parts of the subject share a color AND touch with no outline between them, it'll follow that connection further than you want. If that happens, undo and switch to Brush mode, or lower the tolerance.</dd>
           <dt>Brush size</dt>
-          <dd>How big an area each click/drag touches. For Magic Erase/Restore, this is the size of the starting spot — it can still grow much bigger from there.</dd>
-          <dt>Erase softness</dt>
-          <dd>How feathered the plain Erase brush's edge is. 0% is a hard-edged cut; higher values fade out gradually, which blends better with soft/blurry edges like hair or fur.</dd>
-          <dt>Magic wand tolerance</dt>
-          <dd>How different two neighboring pixels can be and still count as "the same area," for Magic Erase and Restore. Low tolerance only spreads through near-identical color (safer, stays inside real edges/outlines). High tolerance spreads more freely across shading and gradients, but risks leaking past soft or anti-aliased edges.</dd>
+          <dd>How big an area each click/drag touches. In Magic Wand mode, this is the size of the starting spot — it can still grow much bigger from there.</dd>
+          <dt>Softness (Brush mode)</dt>
+          <dd>How feathered the brush edge is. 0% is a hard-edged cut/copy; higher values fade out gradually, which blends better with soft/blurry edges like hair or fur.</dd>
+          <dt>Magic wand tolerance (Magic Wand mode)</dt>
+          <dd>How different two neighboring pixels can be and still count as "the same area." Low tolerance only spreads through near-identical color (safer, stays inside real edges/outlines). High tolerance spreads more freely across shading and gradients, but risks leaking past soft or anti-aliased edges into unrelated same-color areas.</dd>
         </dl>
       </details>
 
