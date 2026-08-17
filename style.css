@@ -150,21 +150,6 @@ button + button {
   margin-top: 8px;
 }
 
-.progress-wrap {
-  margin-top: 10px;
-  height: 6px;
-  background: #262a32;
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.progress-bar {
-  height: 100%;
-  width: 0%;
-  background: var(--accent);
-  transition: width 0.2s;
-}
-
 .tool-toggle {
   display: flex;
   gap: 6px;
@@ -425,4 +410,67 @@ input[type="range"] {
   .fumo-mascot {
     animation: none;
   }
+}
+
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 12, 16, 0.85);
+  backdrop-filter: blur(4px);
+  z-index: 100;
+}
+
+.loading-box {
+  width: min(420px, 88vw);
+  padding: 32px 28px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 16px;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.loading-fumo {
+  width: 72px;
+  height: auto;
+  margin-bottom: 12px;
+  animation: fumo-float 4s ease-in-out infinite;
+}
+
+.loading-box h2 {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.loading-box p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.loading-progress-track {
+  margin: 18px 0 8px;
+  height: 8px;
+  background: #262a32;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.loading-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.2s;
+}
+
+.loading-percent {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 600;
 }
