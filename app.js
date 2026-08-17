@@ -162,6 +162,10 @@ removeBgBtn.addEventListener("click", async () => {
 
     const resultBlob = await removeBackground(sourceBlob, {
       publicPath: new URL("./vendor/model-data/", import.meta.url).toString(),
+      // "isnet" is the full-precision model (higher quality, larger download).
+      // The faster/smaller default is "isnet_fp16" -- both are vendored in
+      // vendor/model-data/, so switching back is just changing this string.
+      model: "isnet",
       progress: (key, current, total) => {
         if (total) {
           const pct = Math.round((current / total) * 100);

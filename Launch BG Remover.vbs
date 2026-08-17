@@ -5,7 +5,7 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
 
 On Error Resume Next
-shell.Run "pythonw -m http.server 8000 --directory """ & scriptDir & """", 0, False
+shell.Run "pythonw """ & scriptDir & "\serve.py"" 8000", 0, False
 On Error Goto 0
 
 WScript.Sleep 700

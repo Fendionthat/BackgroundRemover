@@ -4,7 +4,7 @@ A background remover that runs entirely in your browser — no server, no API ke
 
 ## Features
 
-- **One-click background removal**, powered by [`@imgly/background-removal`](https://github.com/imgly/background-removal-js), an ONNX/WASM segmentation model that runs client-side. The library and the model weights (~95MB) are vendored directly in this repo under `vendor/` — nothing is fetched from a CDN at runtime, so this keeps working regardless of what happens to any third-party service, indefinitely.
+- **One-click background removal**, powered by [`@imgly/background-removal`](https://github.com/imgly/background-removal-js), an ONNX/WASM segmentation model that runs client-side. The library and the model weights are vendored directly in this repo under `vendor/` — nothing is fetched from a CDN at runtime, so this keeps working regardless of what happens to any third-party service, indefinitely.
 - **Erase** and **Restore**, each with two modes:
   - **Brush** — paints exactly where you drag. Precise, freehand.
   - **Magic Wand** — click once and it flood-fills outward through connected, similarly-colored original pixels, stopping at outlines. Great for flat-color backgrounds; switch back to Brush for spots where the wand grabs more than you want (e.g. two same-colored areas that turn out to be touching).
@@ -17,10 +17,10 @@ A background remover that runs entirely in your browser — no server, no API ke
 It's a static site (`index.html` / `style.css` / `app.js`) that needs to be served over HTTP — not opened directly as a `file://` URL — because ES modules and the WASM model require it.
 
 ```bash
-python -m http.server 8000 --directory bg-remover
+python bg-remover/serve.py
 ```
 
-Then open `http://localhost:8000`.
+Then open `http://localhost:8000`. (This uses `serve.py` rather than plain `python -m http.server` because it disables browser caching — useful if you're editing the app in place, since a stale cached copy of a JS file otherwise causes confusing errors after an update.)
 
 ### As a desktop app (Windows)
 
@@ -53,19 +53,23 @@ icons/                    # app icons (PNG + Windows .ico) and their source art
   app.ico                         # Windows shortcut icon, packed from the PNGs above
 scripts/build-icon.html    # regenerates icon-*.png from icons/cirno-source.png (open via the local server)
 scripts/gen_ico.py         # packs icon-*.png into icons/app.ico
-vendor/                   # vendored background-removal library + model weights (~95MB, no CDN dependency)
+vendor/                   # vendored background-removal library + model weights (no CDN dependency)
   background-removal.bundle.mjs   # the library, fully self-contained
   shims/                          # small Node.js API shims the library needs in-browser
-  model-data/                     # ONNX model + ONNX Runtime WASM, split into chunk files
+  model-data/                     # ONNX models + ONNX Runtime WASM, split into chunk files
 ```
 
 To change the icon artwork: replace `icons/cirno-source.png`, open `http://localhost:8000/scripts/build-icon.html`, download the three regenerated sizes into `icons/`, then run `python scripts/gen_ico.py` to rebuild `app.ico`.
 
 ### Why the model is vendored instead of loaded from a CDN
 
-By default this library fetches its ONNX model and WASM runtime from IMG.LY's CDN on first use. That's fine for a quick demo, but it means the app's core feature stops working forever if that CDN ever goes away — not something you want in a tool you're keeping around long-term. Vendoring the exact files this app uses (CPU/wasm execution, the `isnet_fp16` model — the library's defaults) means the app has zero external runtime dependencies: it'll keep working exactly as-is no matter what happens on the internet.
+By default this library fetches its ONNX model and WASM runtime from IMG.LY's CDN on first use. That's fine for a quick demo, but it means the app's core feature stops working forever if that CDN ever goes away — not something you want in a tool you're keeping around long-term. Vendoring the files this app uses means it has zero external runtime dependencies: it'll keep working exactly as-is no matter what happens on the internet.
 
-If you ever want a smaller or larger model variant (`isnet_quint8` / `isnet`), or GPU (WebGPU) execution, you'd need to fetch those additional files the same way and add a `model`/`device` option to the `removeBackground()` call in `app.js`.
+### Two models, both vendored
+
+`vendor/model-data/` has **both** `isnet` (full precision, ~176MB, higher quality — the current default, set via `model: "isnet"` in the `removeBackground()` call in `app.js`) and `isnet_fp16` (~88MB, faster/smaller, noticeably rougher edges). To switch back to the smaller/faster one, change that `model:` line to `"isnet_fp16"` (or delete the line entirely, since `isnet_fp16` is the library's own default).
+
+If you ever want the smallest variant (`isnet_quint8`) or GPU (WebGPU) execution, you'd need to fetch those additional files the same way (see `scripts/download_isnet.py`-style fetching — not included, but the pattern is: read the manifest at `https://staticimgly.com/@imgly/background-removal-data/1.5.7/dist/resources.json`, download the chunks for the model key you want, merge that entry into `vendor/model-data/resources.json`) and set `model`/`device` accordingly.
 
 ## How Magic Wand mode works
 
