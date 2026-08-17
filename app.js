@@ -162,9 +162,10 @@ removeBgBtn.addEventListener("click", async () => {
 
     const resultBlob = await removeBackground(sourceBlob, {
       publicPath: new URL("./vendor/model-data/", import.meta.url).toString(),
-      // "isnet" is the full-precision model (higher quality, larger download).
-      // The faster/smaller default is "isnet_fp16" -- both are vendored in
-      // vendor/model-data/, so switching back is just changing this string.
+      // "isnet" is the full-precision model (higher quality than the
+      // library's smaller/faster default, "isnet_fp16"). Only "isnet" is
+      // vendored in vendor/model-data/ -- switching models means fetching
+      // that model's chunks too (see the README).
       model: "isnet",
       progress: (key, current, total) => {
         if (total) {

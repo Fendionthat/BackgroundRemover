@@ -58,11 +58,11 @@ To change the icon artwork: replace `icons/cirno-source.png`, open `http://local
 
 By default this library fetches its ONNX model and WASM runtime from IMG.LY's CDN on first use. That's fine for a quick demo, but it means the app's core feature stops working forever if that CDN ever goes away — not something you want in a tool you're keeping around long-term. Vendoring the files this app uses means it has zero external runtime dependencies: it'll keep working exactly as-is no matter what happens on the internet.
 
-### Two models, both vendored
+### Which model is vendored
 
-`vendor/model-data/` has **both** `isnet` (full precision, ~176MB, higher quality — the current default, set via `model: "isnet"` in the `removeBackground()` call in `app.js`) and `isnet_fp16` (~88MB, faster/smaller, noticeably rougher edges). To switch back to the smaller/faster one, change that `model:` line to `"isnet_fp16"` (or delete the line entirely, since `isnet_fp16` is the library's own default).
+`vendor/model-data/` has `isnet`, the library's full-precision model (~176MB) — set via `model: "isnet"` in the `removeBackground()` call in `app.js`. The library's own default, `isnet_fp16` (~88MB, noticeably rougher edges), isn't vendored here; the [`legacy` tag](../../tree/legacy) has it if you ever want to go back to it.
 
-If you ever want the smallest variant (`isnet_quint8`) or GPU (WebGPU) execution, you'd need to fetch those additional files the same way (see `scripts/download_isnet.py`-style fetching — not included, but the pattern is: read the manifest at `https://staticimgly.com/@imgly/background-removal-data/1.5.7/dist/resources.json`, download the chunks for the model key you want, merge that entry into `vendor/model-data/resources.json`) and set `model`/`device` accordingly.
+If you want a different variant (`isnet_fp16` / `isnet_quint8`) or GPU (WebGPU) execution, you'd need to fetch those files the same way: read the manifest at `https://staticimgly.com/@imgly/background-removal-data/1.5.7/dist/resources.json`, download the chunks for the model key you want, merge that entry into `vendor/model-data/resources.json`, and set `model`/`device` accordingly.
 
 ## How Magic Wand mode works
 
