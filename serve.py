@@ -23,6 +23,17 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         super().end_headers()
 
+    def log_message(self, format, *args):
+        # Default logging writes to sys.stderr, which is None under
+        # pythonw.exe (no console) -- that raises and drops the
+        # in-progress connection, breaking every request. The desktop
+        # launcher runs this via pythonw specifically so it doesn't
+        # flash a console window, so this can't just be left alone.
+        try:
+            super().log_message(format, *args)
+        except Exception:
+            pass
+
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000

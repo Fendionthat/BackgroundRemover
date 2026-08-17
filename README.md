@@ -24,18 +24,9 @@ Then open `http://localhost:8000`. (This uses `serve.py` rather than plain `pyth
 
 ### As a desktop app (Windows)
 
-Double-click **`Launch BG Remover.vbs`**, or use the **Background Remover** shortcut it creates on your Desktop. It starts the local server in the background and opens the app in its own window (via Chrome/Edge `--app` mode — no tabs, no address bar).
+First time only: double-click **`Create Desktop Shortcut.vbs`**. That adds a **Background Remover** shortcut (with the Cirno icon) to your Desktop.
 
-To (re)create the desktop shortcut:
-
-```powershell
-$WshShell = New-Object -ComObject WScript.Shell
-$Shortcut = $WshShell.CreateShortcut("$env:USERPROFILE\Desktop\Background Remover.lnk")
-$Shortcut.TargetPath = "$PWD\Launch BG Remover.vbs"
-$Shortcut.WorkingDirectory = "$PWD"
-$Shortcut.IconLocation = "$PWD\icons\app.ico"
-$Shortcut.Save()
-```
+From then on, use that shortcut (or double-click **`Launch BG Remover.vbs`** directly, same thing) to open the app — it starts the local server in the background and opens the app in its own window (via Chrome/Edge `--app` mode — no tabs, no address bar).
 
 (Run from inside the `bg-remover` folder.)
 
