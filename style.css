@@ -21,8 +21,31 @@ body {
 }
 
 .topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   padding: 20px 28px 12px;
   border-bottom: 1px solid var(--panel-border);
+}
+
+.github-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 13px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.github-link:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .topbar h1 {
