@@ -1,6 +1,6 @@
 {
-  "name": "Background Remover & Touch-Up",
-  "short_name": "BG Remover",
+  "name": "Cirno BR",
+  "short_name": "Cirno BR",
   "description": "Remove image backgrounds locally in your browser, then touch up the result with erase/restore brushes.",
   "start_url": "./index.html",
   "scope": "./",

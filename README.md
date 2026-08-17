@@ -1,4 +1,6 @@
-# Cirno loves this.
+# Cirno BR
+
+*Cirno loves this.*
 
 A background remover that runs entirely in your browser — no server, no API keys, no image ever leaves your machine, and no external services to depend on — plus a manual touch-up brush for the spots the AI gets wrong.
 
