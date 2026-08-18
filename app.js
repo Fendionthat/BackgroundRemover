@@ -162,29 +162,15 @@ function formatMB(bytes) {
   return (bytes / (1024 * 1024)).toFixed(0);
 }
 
-let loadingReassuranceTimer = null;
-
 function showLoadingOverlay() {
   loadingTitle.textContent = "Getting things ready…";
   loadingSubtext.textContent = "One moment.";
-  loadingProgressBar.classList.add("indeterminate");
-  loadingProgressBar.style.width = "";
+  loadingProgressBar.style.width = "0%";
   loadingPercent.textContent = "";
   loadingOverlay.hidden = false;
-
-  // The very first chunk of a large download can take a while to land on a
-  // slow connection, and until it does there's zero progress to report --
-  // an indeterminate bar alone can still read as "frozen" after several
-  // seconds, so reassure explicitly rather than leave it ambiguous.
-  clearTimeout(loadingReassuranceTimer);
-  loadingReassuranceTimer = setTimeout(() => {
-    loadingSubtext.textContent =
-      "Still working — this is a large one-time download (~180MB), so it can take a few minutes on slower connections. Please keep this tab open.";
-  }, 4000);
 }
 
 function hideLoadingOverlay() {
-  clearTimeout(loadingReassuranceTimer);
   loadingOverlay.hidden = true;
 }
 
@@ -195,9 +181,6 @@ const downloadProgress = new Map();
 
 function updateLoadingProgress(key, current, total) {
   if (!total) return;
-  clearTimeout(loadingReassuranceTimer);
-  loadingProgressBar.classList.remove("indeterminate");
-
   const resourceKey = key.replace(/^fetch:/, "");
   downloadProgress.set(resourceKey, { current, total });
 

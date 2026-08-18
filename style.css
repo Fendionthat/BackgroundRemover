@@ -469,24 +469,6 @@ input[type="range"] {
   transition: width 0.2s;
 }
 
-.loading-progress-bar.indeterminate {
-  width: 40% !important;
-  animation: loading-indeterminate 1.3s ease-in-out infinite;
-}
-
-@keyframes loading-indeterminate {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(250%); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .loading-progress-bar.indeterminate {
-    animation: none;
-    width: 100% !important;
-    opacity: 0.4;
-  }
-}
-
 .loading-percent {
   font-size: 13px;
   color: var(--text);
