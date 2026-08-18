@@ -19,6 +19,10 @@
     <h1>Cirno BR <span>Background Remover + Touch-Up</span></h1>
     <p id="status" class="status">Choose an image to get started.</p>
   </div>
+  <div class="topbar-actions">
+    <button id="undoBtn" disabled title="Undo">↺ Undo</button>
+    <button id="redoBtn" disabled title="Redo">↻ Redo</button>
+  </div>
   <a class="github-link" href="https://github.com/Fendionthat/BackgroundRemover" target="_blank" rel="noopener">
     <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true">
       <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
@@ -41,8 +45,19 @@
       </div>
     </section>
 
+    <section class="panel" id="layersPanel" hidden>
+      <h2>2. Layers</h2>
+      <p class="hint">Drag in another photo (or use the button below) to add it as a new layer. Click a layer to make it active -- Remove Background, Box Select, and Touch Up all apply to whichever layer is active.</p>
+      <div id="layerList"></div>
+      <label class="file-btn">
+        + Add Photo Layer
+        <input type="file" id="addLayerInput" accept="image/*" hidden>
+      </label>
+      <button id="layerTransformBtn">Move / Resize Active Layer</button>
+    </section>
+
     <section class="panel" id="toolPanel" hidden>
-      <h2>2. Touch Up</h2>
+      <h2>3. Touch Up</h2>
       <div class="tool-toggle">
         <button class="tool-btn active" id="eraseToolBtn" data-tool="erase">Erase</button>
         <button class="tool-btn" id="restoreToolBtn" data-tool="restore">Restore</button>
@@ -80,28 +95,33 @@
         </dl>
       </details>
 
-      <div class="btn-row">
-        <button id="undoBtn" disabled>Undo</button>
-        <button id="redoBtn" disabled>Redo</button>
-      </div>
       <button id="resetBtn">Reset to AI Result</button>
     </section>
 
     <section class="panel" id="boxSelectPanel" hidden>
-      <h2>3. Box Select</h2>
-      <p class="hint">Drag a box around an object for an AI-precise selection. Click to add a point, Shift+Click to remove one, then Apply. Uses the Erase/Restore choice above.</p>
+      <h2>4. Box Select</h2>
+      <p class="hint" id="boxSelectHint">Drag a box around an object for an AI-precise selection. Click to add a point, Shift+Click to remove one, then Apply. Uses the Erase/Restore choice above.</p>
+
+      <label class="checkbox-row">
+        <input type="checkbox" id="samIsolateCheckbox">
+        Keep only this, erase everything else
+      </label>
 
       <details class="explain">
         <summary>How does this work?</summary>
         <dl>
           <dt>What it is</dt>
-          <dd>A second, separate AI model (SlimSAM) that picks out one object at a time by its actual shape, not just its color -- useful where Magic Wand grabs too much or too little because the object doesn't have flat, uniform color.</dd>
+          <dd>A second, separate AI model (SlimSAM) that picks out one object at a time by its actual shape, not just its color -- useful where Magic Wand grabs too much or too little because the object doesn't have flat, uniform color. You can use it before "Remove Background" too, as a manual alternative way to cut out your subject.</dd>
           <dt>Drag a box</dt>
           <dd>Draw a rough box around the object. The AI finds its precise edges inside that box and shows the result as a highlighted preview -- nothing is applied to the image yet.</dd>
           <dt>Refine with points</dt>
           <dd>Click inside the highlighted area (or just outside it) to add a point that should be included; Shift+click to add a point that should be excluded. Each click quickly re-runs just the refinement step, not the whole analysis, so it stays responsive. Dragging a new box starts a fresh selection and clears previous points.</dd>
+          <dt>Move</dt>
+          <dd>Once a selection is highlighted, drag from inside it (instead of dragging a new box) to pick it up and reposition it -- a dim red outline marks where it's moving from. Nothing is applied to the image until you hit Apply.</dd>
+          <dt>Keep only this</dt>
+          <dd>Check this box before Apply to erase everything on the canvas except the current selection, instead of just erasing/restoring the selection itself. Combine it with Move to cut an object out and place it precisely.</dd>
           <dt>Apply / Cancel</dt>
-          <dd>Apply writes the current highlighted selection into the image, using whichever of Erase or Restore is selected above -- so this tool doesn't need its own Erase/Restore choice. Cancel discards the selection with no changes made. Either way it's a single undo-able step.</dd>
+          <dd>Apply writes the current selection into the image -- using Erase or Restore above, or "Keep only this" if checked. Cancel discards the selection with no changes made. Either way it's a single undo-able step.</dd>
           <dt>First use</dt>
           <dd>This model is only downloaded the first time you click "Start Box Select" (a small one-time download, shown in the progress bar below) -- it's not part of the initial page load or Remove Background.</dd>
         </dl>
@@ -118,7 +138,7 @@
     </section>
 
     <section class="panel" id="exportPanel" hidden>
-      <h2>4. Export</h2>
+      <h2>5. Export</h2>
       <button id="downloadBtn" class="primary">Download PNG</button>
       <button id="newImageBtn">Start Over With New Image</button>
     </section>
@@ -132,6 +152,7 @@
         </div>
         <canvas id="workingCanvas"></canvas>
         <canvas id="samOverlay" hidden></canvas>
+        <canvas id="layerOverlay" hidden></canvas>
         <div class="brush-cursor" id="brushCursor" hidden></div>
       </div>
       <button class="zoom-indicator" id="zoomIndicator" title="Scroll to zoom. Click to reset to fit." hidden>100%</button>

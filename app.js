@@ -2,6 +2,10 @@ import { removeBackground } from "./vendor/background-removal.bundle.mjs";
 
 const MAX_DIM = 1600;
 const UNDO_LIMIT = 15;
+// The scene is a generously-sized, fixed working area -- not just "the size
+// of whatever photo you loaded" -- so there's real room to drag layers
+// around without them clipping out of view at the edges.
+const SCENE_SIZE = 1600;
 
 const fileInput = document.getElementById("fileInput");
 const removeBgBtn = document.getElementById("removeBgBtn");
@@ -16,8 +20,16 @@ const samProgressBar = document.getElementById("samProgressBar");
 const boxSelectActions = document.getElementById("boxSelectActions");
 const samApplyBtn = document.getElementById("samApplyBtn");
 const samCancelBtn = document.getElementById("samCancelBtn");
+const samIsolateCheckbox = document.getElementById("samIsolateCheckbox");
+const boxSelectHint = document.getElementById("boxSelectHint");
 const samOverlay = document.getElementById("samOverlay");
 const samCtx = samOverlay.getContext("2d");
+const layersPanel = document.getElementById("layersPanel");
+const layerList = document.getElementById("layerList");
+const addLayerInput = document.getElementById("addLayerInput");
+const layerTransformBtn = document.getElementById("layerTransformBtn");
+const layerOverlay = document.getElementById("layerOverlay");
+const layerCtx = layerOverlay.getContext("2d");
 const eraseToolBtn = document.getElementById("eraseToolBtn");
 const restoreToolBtn = document.getElementById("restoreToolBtn");
 const brushModeBtn = document.getElementById("brushModeBtn");
@@ -40,14 +52,137 @@ const canvasViewport = document.getElementById("canvasViewport");
 const canvasWrap = document.getElementById("canvasWrap");
 const zoomIndicator = document.getElementById("zoomIndicator");
 const dropzone = document.getElementById("dropzone");
-const workingCanvas = document.getElementById("workingCanvas");
 const brushCursor = document.getElementById("brushCursor");
 const statusEl = document.getElementById("status");
 
-const ctxWorking = workingCanvas.getContext("2d", { willReadFrequently: true });
+// ---------- Scene (the one real, visible <canvas>) ----------
+//
+// The scene is the composited view of every layer stacked together. Its
+// bitmap size is fixed to the first layer's native size when the first
+// image loads, and stays fixed afterward -- later layers are positioned
+// and scaled *within* that fixed scene, they don't resize it.
+const sceneCanvas = document.getElementById("workingCanvas");
+const ctxScene = sceneCanvas.getContext("2d", { willReadFrequently: true });
 
-const originalCanvas = document.createElement("canvas");
-const ctxOriginal = originalCanvas.getContext("2d", { willReadFrequently: true });
+// ---------- Layers ----------
+//
+// Each layer owns its own pixel data (an offscreen canvas + its pristine
+// "original" source + flood-fill/undo/SAM state). `workingCanvas`/
+// `ctxWorking`/`originalCanvas`/etc. below are NOT the scene -- they're a
+// reassignable "view" onto whichever layer is currently active, so every
+// existing tool (brush, flood fill, Remove Background, Box Select, undo/
+// redo) keeps reading/writing those exact names without any logic changes;
+// they just now mean "the active layer's pixels" instead of "the one photo."
+let layers = [];
+let activeLayerIndex = -1;
+let layerIdCounter = 0;
+
+function activeLayer() {
+  return layers[activeLayerIndex];
+}
+
+function createLayerFromBitmap(bitmap, width, height, name) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(bitmap, 0, 0, width, height);
+
+  const oCanvas = document.createElement("canvas");
+  oCanvas.width = width;
+  oCanvas.height = height;
+  const oCtx = oCanvas.getContext("2d", { willReadFrequently: true });
+  oCtx.drawImage(bitmap, 0, 0, width, height);
+  const oImageData = oCtx.getImageData(0, 0, width, height);
+
+  return {
+    id: ++layerIdCounter,
+    name,
+    canvas,
+    ctx,
+    originalCanvas: oCanvas,
+    ctxOriginal: oCtx,
+    originalImageData: oImageData,
+    fillVisited: new Int32Array(width * height).fill(-1),
+    fillGen: 0,
+    baselineImageData: null,
+    hasResult: false,
+    undoStack: [],
+    redoStack: [],
+    samImageProcessed: null,
+    samImageEmbeddings: null,
+    x: 0,
+    y: 0,
+    scale: 1,
+  };
+}
+
+// Reassignable "active layer view" -- see comment above.
+let workingCanvas = null;
+let ctxWorking = null;
+let originalCanvas = null;
+let ctxOriginal = null;
+let originalImageData = null;
+let fillVisited = null;
+let fillGen = 0;
+let baselineImageData = null;
+let hasResult = false;
+let undoStack = [];
+let redoStack = [];
+let samImageProcessed = null;
+let samImageEmbeddings = null;
+
+function syncActiveLayerGlobals() {
+  const L = activeLayer();
+  workingCanvas = L.canvas;
+  ctxWorking = L.ctx;
+  originalCanvas = L.originalCanvas;
+  ctxOriginal = L.ctxOriginal;
+  originalImageData = L.originalImageData;
+  fillVisited = L.fillVisited;
+  fillGen = L.fillGen;
+  baselineImageData = L.baselineImageData;
+  hasResult = L.hasResult;
+  undoStack = L.undoStack;
+  redoStack = L.redoStack;
+  samImageProcessed = L.samImageProcessed;
+  samImageEmbeddings = L.samImageEmbeddings;
+}
+
+// Primitive/reassignable fields (fillGen, baselineImageData, hasResult, the
+// SAM embedding cache) don't automatically stay in sync with the layer
+// object the way shared canvas/array references do -- this flushes the
+// current "view" back before switching away from a layer.
+function saveActiveLayerGlobals() {
+  if (activeLayerIndex < 0) return;
+  const L = activeLayer();
+  L.fillGen = fillGen;
+  L.baselineImageData = baselineImageData;
+  L.hasResult = hasResult;
+  L.samImageProcessed = samImageProcessed;
+  L.samImageEmbeddings = samImageEmbeddings;
+}
+
+function renderComposite() {
+  ctxScene.clearRect(0, 0, sceneCanvas.width, sceneCanvas.height);
+  for (const L of layers) {
+    ctxScene.drawImage(
+      L.canvas,
+      0, 0, L.canvas.width, L.canvas.height,
+      L.x, L.y, L.canvas.width * L.scale, L.canvas.height * L.scale
+    );
+  }
+}
+
+function refreshPanels() {
+  const any = layers.length > 0;
+  layersPanel.hidden = !any;
+  boxSelectPanel.hidden = !any;
+  exportPanel.hidden = !any;
+  toolPanel.hidden = !any;
+  updateBoxSelectHint();
+  updateUndoRedoButtons();
+}
 
 let currentTool = "erase";
 let magicMode = false;
@@ -56,15 +191,8 @@ let softness = 0.5;
 let tolerance = 20; // matches the tolerance slider's default (8%) of 255
 let isDrawing = false;
 let lastPoint = null;
-let undoStack = [];
-let redoStack = [];
-let baselineImageData = null;
 let hasImage = false;
-let hasResult = false;
 
-let originalImageData = null;
-let fillVisited = null;
-let fillGen = 0;
 let strokeImageData = null;
 
 let activeTool = "touchup"; // "touchup" | "boxSelect"
@@ -72,18 +200,26 @@ let samModule = null; // { SamModel, AutoProcessor, RawImage, Tensor, env }
 let samModel = null;
 let samProcessor = null;
 let samLoadingPromise = null;
-let samImageVersion = 0;
-let samEmbeddingsVersion = -1;
-let samImageProcessed = null;
-let samImageEmbeddings = null;
-let samBox = null; // {x0,y0,x1,y1} in original-image pixel space
+let samBox = null; // {x0,y0,x1,y1} in active-layer-local pixel space
 let samPoints = []; // [{x, y, label}]
-let samMask = null; // Uint8Array, one byte per pixel, original-image resolution
+let samMask = null; // Uint8Array, one byte per pixel, active-layer-local resolution
 let samDragStart = null;
 let samDragging = false;
 let samMoved = false;
 let samBusy = false;
 let samPromptQueued = false;
+let samMoveDX = 0;
+let samMoveDY = 0;
+let samMoveActive = false;
+let samMoveStart = null;
+let samMoveOrigDX = 0;
+let samMoveOrigDY = 0;
+
+let layerDragMode = null; // null | "move" | "resize"
+let layerDragStart = null;
+let layerDragOrigX = 0;
+let layerDragOrigY = 0;
+let layerDragOrigScale = 1;
 
 let zoom = 1;
 const ZOOM_MIN = 0.1;
@@ -123,39 +259,70 @@ async function loadImageFile(file) {
   width = Math.round(width * scale);
   height = Math.round(height * scale);
 
-  originalCanvas.width = width;
-  originalCanvas.height = height;
-  ctxOriginal.clearRect(0, 0, width, height);
-  ctxOriginal.drawImage(bitmap, 0, 0, width, height);
-  originalImageData = ctxOriginal.getImageData(0, 0, width, height);
-  fillVisited = new Int32Array(width * height).fill(-1);
-  fillGen = 0;
-
-  workingCanvas.width = width;
-  workingCanvas.height = height;
-  ctxWorking.clearRect(0, 0, width, height);
-  ctxWorking.drawImage(bitmap, 0, 0, width, height);
+  layers = [createLayerFromBitmap(bitmap, width, height, "Layer 1")];
+  activeLayerIndex = 0;
+  sceneCanvas.width = SCENE_SIZE;
+  sceneCanvas.height = SCENE_SIZE;
+  layers[0].x = (SCENE_SIZE - width) / 2;
+  layers[0].y = (SCENE_SIZE - height) / 2;
+  syncActiveLayerGlobals();
 
   hasImage = true;
-  hasResult = false;
-  undoStack = [];
-  redoStack = [];
-  baselineImageData = null;
-  toolPanel.hidden = true;
-  exportPanel.hidden = true;
-  boxSelectPanel.hidden = true;
   if (activeTool === "boxSelect") deactivateBoxSelect();
-  samImageVersion++;
   dropzone.style.display = "none";
   removeBgBtn.disabled = false;
-  updateUndoRedoButtons();
+  refreshPanels();
+  renderLayerList();
+  renderComposite();
   resetZoom();
   setStatus(`Loaded image (${width}×${height}). Click "Remove Background" when ready.`);
 }
 
+// Adds a photo as a new layer on top of whatever's already there, instead of
+// replacing it -- the scene's own size (set by the first layer) never
+// changes; later layers are just positioned/scaled within it.
+async function addLayer(file) {
+  const bitmap = await createImageBitmap(file);
+  let { width, height } = bitmap;
+  const scale = Math.min(1, MAX_DIM / Math.max(width, height));
+  width = Math.round(width * scale);
+  height = Math.round(height * scale);
+
+  const layer = createLayerFromBitmap(bitmap, width, height, `Layer ${layers.length + 1}`);
+  const fitScale = Math.min(1, (sceneCanvas.width * 0.8) / width, (sceneCanvas.height * 0.8) / height);
+  layer.scale = fitScale;
+  layer.x = (sceneCanvas.width - width * fitScale) / 2;
+  layer.y = (sceneCanvas.height - height * fitScale) / 2;
+
+  saveActiveLayerGlobals();
+  layers.push(layer);
+  activeLayerIndex = layers.length - 1;
+  syncActiveLayerGlobals();
+
+  if (activeTool === "boxSelect") deactivateBoxSelect();
+  if (activeTool === "layerTransform") deactivateLayerTransform();
+  refreshPanels();
+  renderLayerList();
+  renderComposite();
+  setStatus(`Added "${layer.name}" as a new layer.`);
+}
+
+function loadOrAddImage(file) {
+  if (layers.length === 0) {
+    loadImageFile(file);
+  } else {
+    addLayer(file);
+  }
+}
+
 fileInput.addEventListener("change", (e) => {
   const file = e.target.files[0];
-  if (file) loadImageFile(file);
+  if (file) loadOrAddImage(file);
+});
+
+addLayerInput.addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (file) loadOrAddImage(file);
 });
 
 ["dragenter", "dragover"].forEach((evt) =>
@@ -172,8 +339,157 @@ fileInput.addEventListener("change", (e) => {
 );
 canvasWrap.addEventListener("drop", (e) => {
   const file = e.dataTransfer.files[0];
-  if (file && file.type.startsWith("image/")) loadImageFile(file);
+  if (file && file.type.startsWith("image/")) loadOrAddImage(file);
 });
+
+// ---------- Layer list / selection / reorder / delete ----------
+
+function setActiveLayer(index) {
+  if (index === activeLayerIndex) return;
+  saveActiveLayerGlobals();
+  activeLayerIndex = index;
+  syncActiveLayerGlobals();
+  if (activeTool === "boxSelect") deactivateBoxSelect();
+  if (activeTool === "layerTransform") deactivateLayerTransform();
+  refreshPanels();
+  renderLayerList();
+  updateCursorSize();
+  setStatus(
+    hasResult
+      ? 'Pick Erase or Restore, then Brush (precise) or Magic Wand (click a whole same-color area) below.'
+      : `"${activeLayer().name}" selected. Click "Remove Background" or "Start Box Select" to cut out its subject.`
+  );
+}
+
+function reorderLayer(index, direction) {
+  const target = index + direction;
+  if (target < 0 || target >= layers.length) return;
+  const activeId = activeLayer().id;
+  const tmp = layers[index];
+  layers[index] = layers[target];
+  layers[target] = tmp;
+  activeLayerIndex = layers.findIndex((L) => L.id === activeId);
+  renderLayerList();
+  renderComposite();
+}
+
+function deleteLayer(index) {
+  if (!confirm(`Delete "${layers[index].name}"?`)) return;
+  const wasActive = index === activeLayerIndex;
+  layers.splice(index, 1);
+  if (layers.length === 0) {
+    resetAllLayers();
+    return;
+  }
+  if (wasActive) {
+    activeLayerIndex = Math.min(index, layers.length - 1);
+    syncActiveLayerGlobals();
+  } else if (index < activeLayerIndex) {
+    activeLayerIndex--;
+  }
+  if (activeTool === "boxSelect") deactivateBoxSelect();
+  if (activeTool === "layerTransform") deactivateLayerTransform();
+  refreshPanels();
+  renderLayerList();
+  renderComposite();
+}
+
+function renderLayerList() {
+  layerList.innerHTML = "";
+  // Front-most layer (drawn last, on top) shown first in the list.
+  for (let i = layers.length - 1; i >= 0; i--) {
+    const L = layers[i];
+    const row = document.createElement("div");
+    row.className = "layer-row" + (i === activeLayerIndex ? " active" : "");
+
+    const thumb = document.createElement("canvas");
+    thumb.width = 36;
+    thumb.height = 36;
+    const tctx = thumb.getContext("2d");
+    const s = Math.min(36 / L.canvas.width, 36 / L.canvas.height);
+    const tw = L.canvas.width * s, th = L.canvas.height * s;
+    tctx.drawImage(L.canvas, (36 - tw) / 2, (36 - th) / 2, tw, th);
+    row.appendChild(thumb);
+
+    const name = document.createElement("span");
+    name.className = "layer-name";
+    name.textContent = L.name;
+    row.appendChild(name);
+
+    const btns = document.createElement("div");
+    btns.className = "layer-btns";
+
+    const upBtn = document.createElement("button");
+    upBtn.type = "button";
+    upBtn.textContent = "▲";
+    upBtn.title = "Bring forward";
+    upBtn.disabled = i === layers.length - 1;
+    upBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      reorderLayer(i, 1);
+    });
+    btns.appendChild(upBtn);
+
+    const downBtn = document.createElement("button");
+    downBtn.type = "button";
+    downBtn.textContent = "▼";
+    downBtn.title = "Send backward";
+    downBtn.disabled = i === 0;
+    downBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      reorderLayer(i, -1);
+    });
+    btns.appendChild(downBtn);
+
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.textContent = "🗑";
+    delBtn.title = "Delete layer";
+    delBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteLayer(i);
+    });
+    btns.appendChild(delBtn);
+
+    row.appendChild(btns);
+    row.addEventListener("click", () => setActiveLayer(i));
+    layerList.appendChild(row);
+  }
+}
+
+function resetAllLayers() {
+  layers = [];
+  activeLayerIndex = -1;
+  workingCanvas = null;
+  ctxWorking = null;
+  originalCanvas = null;
+  ctxOriginal = null;
+  originalImageData = null;
+  fillVisited = null;
+  fillGen = 0;
+  baselineImageData = null;
+  hasResult = false;
+  undoStack = [];
+  redoStack = [];
+  samImageProcessed = null;
+  samImageEmbeddings = null;
+
+  hasImage = false;
+  fileInput.value = "";
+  addLayerInput.value = "";
+  if (activeTool === "boxSelect") deactivateBoxSelect();
+  if (activeTool === "layerTransform") deactivateLayerTransform();
+  dropzone.style.display = "flex";
+  removeBgBtn.disabled = true;
+  ctxScene.clearRect(0, 0, sceneCanvas.width, sceneCanvas.height);
+  sceneCanvas.style.width = "";
+  sceneCanvas.style.height = "";
+  zoom = 1;
+  zoomIndicator.hidden = true;
+  refreshPanels();
+  renderLayerList();
+  setStatus("Choose an image to get started.");
+}
 
 // ---------- Background removal ----------
 
@@ -210,13 +526,13 @@ removeBgBtn.addEventListener("click", async () => {
     ctxWorking.drawImage(bitmap, 0, 0, workingCanvas.width, workingCanvas.height);
 
     baselineImageData = ctxWorking.getImageData(0, 0, workingCanvas.width, workingCanvas.height);
-    undoStack = [];
-    redoStack = [];
+    undoStack.length = 0;
+    redoStack.length = 0;
     hasResult = true;
-    toolPanel.hidden = false;
-    exportPanel.hidden = false;
-    boxSelectPanel.hidden = false;
-    updateUndoRedoButtons();
+    saveActiveLayerGlobals();
+    refreshPanels();
+    renderLayerList();
+    renderComposite();
     applyZoom();
     setStatus('Background removed. Pick Erase or Restore, then Brush (precise) or Magic Wand (click a whole same-color area) below.');
   } catch (err) {
@@ -284,13 +600,20 @@ toleranceInput.addEventListener("input", () => {
 
 // ---------- Drawing ----------
 
+// Maps a screen pointer event to the *active layer's own local pixel
+// space* -- the scene may show the layer positioned/scaled anywhere within
+// it, so a screen point first maps to scene-bitmap space, then un-translates
+// and un-scales by the active layer's own x/y/scale.
 function getCanvasPoint(evt) {
-  const rect = workingCanvas.getBoundingClientRect();
-  const scaleX = workingCanvas.width / rect.width;
-  const scaleY = workingCanvas.height / rect.height;
+  const rect = sceneCanvas.getBoundingClientRect();
+  const scaleX = sceneCanvas.width / rect.width;
+  const scaleY = sceneCanvas.height / rect.height;
+  const sceneX = (evt.clientX - rect.left) * scaleX;
+  const sceneY = (evt.clientY - rect.top) * scaleY;
+  const L = activeLayer();
   return {
-    x: (evt.clientX - rect.left) * scaleX,
-    y: (evt.clientY - rect.top) * scaleY,
+    x: (sceneX - L.x) / L.scale,
+    y: (sceneY - L.y) / L.scale,
     clientX: evt.clientX,
     clientY: evt.clientY,
   };
@@ -479,7 +802,7 @@ function pushUndo() {
   const snapshot = ctxWorking.getImageData(0, 0, workingCanvas.width, workingCanvas.height);
   undoStack.push(snapshot);
   if (undoStack.length > UNDO_LIMIT) undoStack.shift();
-  redoStack = [];
+  redoStack.length = 0;
   updateUndoRedoButtons();
 }
 
@@ -488,22 +811,53 @@ function updateUndoRedoButtons() {
   redoBtn.disabled = redoStack.length === 0;
 }
 
-workingCanvas.addEventListener("pointerdown", (e) => {
-  if (activeTool === "boxSelect") {
-    if (!hasResult) return;
+sceneCanvas.addEventListener("pointerdown", (e) => {
+  if (activeTool === "layerTransform") {
+    if (activeLayerIndex < 0) return;
     try {
-      workingCanvas.setPointerCapture(e.pointerId);
+      sceneCanvas.setPointerCapture(e.pointerId);
+    } catch {
+      // some input sources (synthetic events, certain stylus drivers) don't support capture
+    }
+    const p = getScenePoint(e);
+    const L = activeLayer();
+    if (pointInHandle(L, p)) {
+      layerDragMode = "resize";
+    } else if (pointInLayerBox(L, p)) {
+      layerDragMode = "move";
+    } else {
+      layerDragMode = null;
+      return;
+    }
+    layerDragStart = p;
+    layerDragOrigX = L.x;
+    layerDragOrigY = L.y;
+    layerDragOrigScale = L.scale;
+    return;
+  }
+  if (activeTool === "boxSelect") {
+    if (!hasImage) return;
+    try {
+      sceneCanvas.setPointerCapture(e.pointerId);
     } catch {
       // some input sources (synthetic events, certain stylus drivers) don't support capture; drawing still works without it
     }
-    samDragStart = getCanvasPoint(e);
+    const p = getCanvasPoint(e);
+    if (samMask && pointInMask(p.x, p.y)) {
+      samMoveActive = true;
+      samMoveStart = p;
+      samMoveOrigDX = samMoveDX;
+      samMoveOrigDY = samMoveDY;
+      return;
+    }
+    samDragStart = p;
     samDragging = true;
     samMoved = false;
     return;
   }
-  if (!hasResult) return;
+  if (!hasImage) return;
   try {
-    workingCanvas.setPointerCapture(e.pointerId);
+    sceneCanvas.setPointerCapture(e.pointerId);
   } catch {
     // some input sources (synthetic events, certain stylus drivers) don't support capture; drawing still works without it
   }
@@ -515,38 +869,86 @@ workingCanvas.addEventListener("pointerdown", (e) => {
   }
   const p = getCanvasPoint(e);
   strokeTo(p);
+  renderComposite();
 });
 
 let lastPointerEvent = null;
 
-workingCanvas.addEventListener("pointermove", (e) => {
+sceneCanvas.addEventListener("pointermove", (e) => {
   lastPointerEvent = e;
+  if (activeTool === "layerTransform") {
+    if (!layerDragMode) return;
+    const p = getScenePoint(e);
+    const L = activeLayer();
+    if (layerDragMode === "move") {
+      L.x = layerDragOrigX + (p.x - layerDragStart.x);
+      L.y = layerDragOrigY + (p.y - layerDragStart.y);
+    } else if (layerDragMode === "resize") {
+      const origW = L.canvas.width * layerDragOrigScale;
+      const newW = Math.max(10, origW + (p.x - layerDragStart.x));
+      L.scale = Math.max(0.02, newW / L.canvas.width);
+    }
+    renderComposite();
+    drawLayerOverlay();
+    return;
+  }
   if (activeTool === "boxSelect") {
+    const p = getCanvasPoint(e);
+    if (samMoveActive) {
+      samMoveDX = samMoveOrigDX + (p.x - samMoveStart.x);
+      samMoveDY = samMoveOrigDY + (p.y - samMoveStart.y);
+      drawSamOverlay();
+      return;
+    }
     if (samDragging) {
-      const p = getCanvasPoint(e);
       if (Math.abs(p.x - samDragStart.x) > 3 || Math.abs(p.y - samDragStart.y) > 3) samMoved = true;
       samBox = normalizeBox(samDragStart, p);
       drawSamOverlay();
+      return;
     }
+    sceneCanvas.style.cursor = samMask && pointInMask(p.x, p.y) ? "move" : "crosshair";
     return;
   }
   updateCursorPosition(e);
   if (!isDrawing) return;
   const p = getCanvasPoint(e);
   strokeTo(p);
+  renderComposite();
 });
 
 canvasWrap.addEventListener("scroll", () => {
   if (lastPointerEvent) updateCursorPosition(lastPointerEvent);
   if (activeTool === "boxSelect") positionSamOverlay();
+  if (activeTool === "layerTransform") positionLayerOverlay();
 });
 
 window.addEventListener("pointerup", (e) => {
+  if (activeTool === "layerTransform") {
+    layerDragMode = null;
+    return;
+  }
   if (activeTool === "boxSelect") {
+    if (samMoveActive) {
+      samMoveActive = false;
+      const p = getCanvasPoint(e);
+      const dist = Math.hypot(p.x - samMoveStart.x, p.y - samMoveStart.y);
+      if (dist <= 3) {
+        // barely moved -- treat as a click on the mask (add a refinement point), not a drag
+        samMoveDX = samMoveOrigDX;
+        samMoveDY = samMoveOrigDY;
+        samPoints.push({ x: p.x, y: p.y, label: e.shiftKey ? 0 : 1 });
+        runSamPrompt();
+        return;
+      }
+      setStatus("Selection moved. Drag it again to reposition, or Apply to place it here.");
+      return;
+    }
     if (samDragging) {
       samDragging = false;
       if (samMoved && samBox) {
         samPoints = [];
+        samMoveDX = 0;
+        samMoveDY = 0;
         runSamPrompt();
       } else if (!samMoved && samBox) {
         const p = getCanvasPoint(e);
@@ -562,7 +964,7 @@ window.addEventListener("pointerup", (e) => {
 });
 
 canvasWrap.addEventListener("pointerenter", () => {
-  if (hasResult && activeTool !== "boxSelect") brushCursor.hidden = false;
+  if (hasImage && activeTool === "touchup") brushCursor.hidden = false;
 });
 canvasWrap.addEventListener("pointerleave", () => {
   brushCursor.hidden = true;
@@ -578,9 +980,11 @@ function updateCursorPosition(e) {
 }
 
 function updateCursorSize() {
-  const rect = workingCanvas.getBoundingClientRect();
-  const displayScale = rect.width / workingCanvas.width || 1;
-  const displaySize = brushSize * 2 * displayScale;
+  const rect = sceneCanvas.getBoundingClientRect();
+  const sceneDisplayScale = (rect.width / sceneCanvas.width) || 1;
+  const L = activeLayerIndex >= 0 ? activeLayer() : null;
+  const layerScale = L ? L.scale : 1;
+  const displaySize = brushSize * 2 * layerScale * sceneDisplayScale;
   brushCursor.style.width = displaySize + "px";
   brushCursor.style.height = displaySize + "px";
 }
@@ -592,8 +996,8 @@ function updateCursorSize() {
 // interactive segmentation model, vendored under vendor/sam/) via
 // transformers.js (vendored under vendor/transformers/), independent of the
 // isnet background-removal pipeline above. The expensive image-embedding
-// pass runs once per source photo (cached, keyed by samImageVersion); box
-// drags and point clicks only re-run the fast decoder.
+// pass runs once per layer (cached on the layer itself); box drags and
+// point clicks only re-run the fast decoder.
 
 function ensureSamLoaded() {
   if (samModel && samProcessor) return Promise.resolve();
@@ -646,13 +1050,21 @@ async function loadSam() {
 }
 
 async function ensureSamEmbeddings() {
-  if (samEmbeddingsVersion === samImageVersion && samImageEmbeddings) return;
+  if (samImageEmbeddings) return;
   setStatus("Analyzing image for Box Select…");
   const { RawImage } = samModule;
   const image = await RawImage.read(originalCanvas);
   samImageProcessed = await samProcessor(image);
   samImageEmbeddings = await samModel.get_image_embeddings(samImageProcessed);
-  samEmbeddingsVersion = samImageVersion;
+  saveActiveLayerGlobals();
+}
+
+function updateBoxSelectHint() {
+  samIsolateCheckbox.disabled = !hasResult;
+  if (!hasResult) samIsolateCheckbox.checked = true;
+  boxSelectHint.textContent = hasResult
+    ? 'Drag a box around an object for an AI-precise selection. Click to add a point, Shift+Click to remove one, then Apply.'
+    : 'Drag a box around your subject to cut it out -- an alternative to "Remove Background" above. Refine with points, then Apply.';
 }
 
 function activateBoxSelect() {
@@ -660,10 +1072,13 @@ function activateBoxSelect() {
   samBox = null;
   samPoints = [];
   samMask = null;
+  samMoveDX = 0;
+  samMoveDY = 0;
+  samMoveActive = false;
   boxSelectToolBtn.textContent = "Cancel Box Select";
   boxSelectActions.hidden = true;
   brushCursor.hidden = true;
-  workingCanvas.style.cursor = "crosshair";
+  sceneCanvas.style.cursor = "crosshair";
   samOverlay.hidden = false;
   positionSamOverlay();
   clearSamOverlay();
@@ -675,12 +1090,15 @@ function deactivateBoxSelect() {
   samBox = null;
   samPoints = [];
   samMask = null;
+  samMoveDX = 0;
+  samMoveDY = 0;
+  samMoveActive = false;
   samDragging = false;
   samDragStart = null;
   boxSelectToolBtn.textContent = "Start Box Select";
   boxSelectActions.hidden = true;
   samOverlay.hidden = true;
-  workingCanvas.style.cursor = "";
+  sceneCanvas.style.cursor = "";
   clearSamOverlay();
   if (hasResult) {
     setStatus('Pick Erase or Restore, then Brush (precise) or Magic Wand (click a whole same-color area) below.');
@@ -692,7 +1110,7 @@ boxSelectToolBtn.addEventListener("click", async () => {
     deactivateBoxSelect();
     return;
   }
-  if (!hasResult) return;
+  if (!hasImage) return;
   boxSelectToolBtn.disabled = true;
   try {
     await ensureSamLoaded();
@@ -706,6 +1124,15 @@ boxSelectToolBtn.addEventListener("click", async () => {
   boxSelectToolBtn.disabled = false;
   activateBoxSelect();
 });
+
+function pointInMask(x, y) {
+  if (!samMask) return false;
+  const w = workingCanvas.width, h = workingCanvas.height;
+  const px = Math.round(x - samMoveDX);
+  const py = Math.round(y - samMoveDY);
+  if (px < 0 || py < 0 || px >= w || py >= h) return false;
+  return samMask[py * w + px] === 1;
+}
 
 function normalizeBox(a, b) {
   const w = workingCanvas.width, h = workingCanvas.height;
@@ -721,15 +1148,25 @@ function centerPointOf(box) {
   return { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2, label: 1 };
 }
 
+// Positions/sizes the overlay to exactly cover the *active layer's* box as
+// currently projected onto the scene (accounting for the layer's own x/y/
+// scale), so masks and box/point markers -- all in layer-local pixel space
+// -- line up correctly regardless of where/how large the layer sits.
 function positionSamOverlay() {
   const wrapRect = canvasWrap.getBoundingClientRect();
-  const canvasRect = workingCanvas.getBoundingClientRect();
-  samOverlay.width = workingCanvas.width;
-  samOverlay.height = workingCanvas.height;
-  samOverlay.style.left = canvasRect.left - wrapRect.left + canvasWrap.scrollLeft + "px";
-  samOverlay.style.top = canvasRect.top - wrapRect.top + canvasWrap.scrollTop + "px";
-  samOverlay.style.width = canvasRect.width + "px";
-  samOverlay.style.height = canvasRect.height + "px";
+  const sceneRect = sceneCanvas.getBoundingClientRect();
+  const sceneDisplayScale = (sceneRect.width / sceneCanvas.width) || 1;
+  const L = activeLayer();
+  samOverlay.width = L.canvas.width;
+  samOverlay.height = L.canvas.height;
+  const onScreenX = sceneRect.left + L.x * sceneDisplayScale;
+  const onScreenY = sceneRect.top + L.y * sceneDisplayScale;
+  const onScreenW = L.canvas.width * L.scale * sceneDisplayScale;
+  const onScreenH = L.canvas.height * L.scale * sceneDisplayScale;
+  samOverlay.style.left = onScreenX - wrapRect.left + canvasWrap.scrollLeft + "px";
+  samOverlay.style.top = onScreenY - wrapRect.top + canvasWrap.scrollTop + "px";
+  samOverlay.style.width = onScreenW + "px";
+  samOverlay.style.height = onScreenH + "px";
 }
 
 function clearSamOverlay() {
@@ -739,23 +1176,39 @@ function clearSamOverlay() {
 function drawSamOverlay() {
   clearSamOverlay();
   const w = samOverlay.width, h = samOverlay.height;
+  const moved = samMoveDX !== 0 || samMoveDY !== 0;
 
   if (samMask) {
     const imgData = samCtx.createImageData(w, h);
     const px = imgData.data;
-    for (let i = 0; i < w * h; i++) {
-      if (samMask[i]) {
+    if (moved) {
+      // dim red "ghost" marking where the selection is moving from
+      for (let i = 0; i < w * h; i++) {
+        if (!samMask[i]) continue;
         const p = i * 4;
-        px[p] = 34;
-        px[p + 1] = 211;
-        px[p + 2] = 238;
-        px[p + 3] = 115;
+        px[p] = 255;
+        px[p + 1] = 107;
+        px[p + 2] = 107;
+        px[p + 3] = 55;
       }
+    }
+    // highlight at the current (possibly offset) position
+    for (let i = 0; i < w * h; i++) {
+      if (!samMask[i]) continue;
+      const y = (i / w) | 0;
+      const x = i % w;
+      const dx = x + samMoveDX, dy = y + samMoveDY;
+      if (dx < 0 || dx >= w || dy < 0 || dy >= h) continue;
+      const p = (dy * w + dx) * 4;
+      px[p] = 34;
+      px[p + 1] = 211;
+      px[p + 2] = 238;
+      px[p + 3] = 130;
     }
     samCtx.putImageData(imgData, 0, 0);
   }
 
-  const rect = workingCanvas.getBoundingClientRect();
+  const rect = samOverlay.getBoundingClientRect();
   const bitmapToScreen = w / (rect.width || w);
 
   if (samBox) {
@@ -836,6 +1289,23 @@ async function runSamPrompt() {
     for (let i = 0; i < mw * mh; i++) {
       maskArr[i] = maskImage.data[numMasks * i + bestIndex] === 1 ? 1 : 0;
     }
+    // SAM's box prompt is a strong hint, not a hard constraint -- it can
+    // occasionally bleed a few pixels past the drawn box. Clip the mask to
+    // the box so nothing outside it is ever picked up.
+    if (samBox) {
+      const bx0 = Math.floor(samBox.x0), bx1 = Math.ceil(samBox.x1);
+      const by0 = Math.floor(samBox.y0), by1 = Math.ceil(samBox.y1);
+      for (let y = 0; y < mh; y++) {
+        if (y >= by0 && y <= by1) continue;
+        const rowStart = y * mw;
+        for (let x = 0; x < mw; x++) maskArr[rowStart + x] = 0;
+      }
+      for (let y = Math.max(0, by0); y <= Math.min(mh - 1, by1); y++) {
+        const rowStart = y * mw;
+        for (let x = 0; x < bx0; x++) maskArr[rowStart + x] = 0;
+        for (let x = bx1 + 1; x < mw; x++) maskArr[rowStart + x] = 0;
+      }
+    }
     samMask = maskArr;
     boxSelectActions.hidden = false;
     drawSamOverlay();
@@ -855,46 +1325,86 @@ async function runSamPrompt() {
 samApplyBtn.addEventListener("click", () => {
   if (!samMask) return;
   const w = workingCanvas.width, h = workingCanvas.height;
-  let minX = w, minY = h, maxX = -1, maxY = -1;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (samMask[y * w + x]) {
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-      }
+
+  let hasAny = false;
+  for (let i = 0; i < samMask.length; i++) {
+    if (samMask[i]) {
+      hasAny = true;
+      break;
     }
   }
-  if (maxX < minX) {
+  if (!hasAny) {
     deactivateBoxSelect();
     return;
   }
 
+  const firstExtraction = !hasResult;
+  const isolate = firstExtraction || samIsolateCheckbox.checked;
+  const dx = Math.round(samMoveDX), dy = Math.round(samMoveDY);
+  const moved = dx !== 0 || dy !== 0;
+
   pushUndo();
-  const snap = ctxWorking.getImageData(0, 0, w, h);
-  const buf = snap.data;
+  const before = ctxWorking.getImageData(0, 0, w, h);
+  const beforeBuf = before.data;
   const orig = originalImageData.data;
+  const srcBuf = firstExtraction ? orig : beforeBuf;
+
+  // Isolate starts from a blank canvas (everything not the selection gets
+  // cleared); otherwise we start from a copy of the current canvas so
+  // untouched pixels stay exactly as they were.
+  const out = isolate ? ctxWorking.createImageData(w, h) : new ImageData(new Uint8ClampedArray(beforeBuf), w, h);
+  const outBuf = out.data;
   const erase = currentTool === "erase";
-  for (let y = minY; y <= maxY; y++) {
-    for (let x = minX; x <= maxX; x++) {
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
       const i = y * w + x;
       if (!samMask[i]) continue;
       const p = i * 4;
-      if (erase) {
-        buf[p] = 0;
-        buf[p + 1] = 0;
-        buf[p + 2] = 0;
-        buf[p + 3] = 0;
+      if (moved) {
+        // always cut the original spot away when relocating, then paste at the new spot
+        outBuf[p] = 0;
+        outBuf[p + 1] = 0;
+        outBuf[p + 2] = 0;
+        outBuf[p + 3] = 0;
+        const tx = x + dx, ty = y + dy;
+        if (tx >= 0 && tx < w && ty >= 0 && ty < h) {
+          const tp = (ty * w + tx) * 4;
+          outBuf[tp] = srcBuf[p];
+          outBuf[tp + 1] = srcBuf[p + 1];
+          outBuf[tp + 2] = srcBuf[p + 2];
+          outBuf[tp + 3] = srcBuf[p + 3];
+        }
+      } else if (isolate) {
+        outBuf[p] = srcBuf[p];
+        outBuf[p + 1] = srcBuf[p + 1];
+        outBuf[p + 2] = srcBuf[p + 2];
+        outBuf[p + 3] = srcBuf[p + 3];
+      } else if (erase) {
+        outBuf[p] = 0;
+        outBuf[p + 1] = 0;
+        outBuf[p + 2] = 0;
+        outBuf[p + 3] = 0;
       } else {
-        buf[p] = orig[p];
-        buf[p + 1] = orig[p + 1];
-        buf[p + 2] = orig[p + 2];
-        buf[p + 3] = orig[p + 3];
+        outBuf[p] = orig[p];
+        outBuf[p + 1] = orig[p + 1];
+        outBuf[p + 2] = orig[p + 2];
+        outBuf[p + 3] = orig[p + 3];
       }
     }
   }
-  ctxWorking.putImageData(snap, 0, 0, minX, minY, maxX - minX + 1, maxY - minY + 1);
+
+  ctxWorking.putImageData(out, 0, 0);
+
+  if (firstExtraction) {
+    baselineImageData = ctxWorking.getImageData(0, 0, w, h);
+    hasResult = true;
+    saveActiveLayerGlobals();
+    refreshPanels();
+  }
+
+  renderLayerList();
+  renderComposite();
   deactivateBoxSelect();
 });
 
@@ -902,21 +1412,130 @@ samCancelBtn.addEventListener("click", () => {
   deactivateBoxSelect();
 });
 
+// ---------- Layer Move / Resize ----------
+//
+// Unlike Box Select's mask, moving/resizing a whole layer has nothing to
+// "refine" -- it takes effect immediately as you drag, no separate Apply
+// step. Operates in *scene* space (the layer moves around the shared
+// canvas), not layer-local space, so it uses its own point helper rather
+// than getCanvasPoint().
+
+function getScenePoint(evt) {
+  const rect = sceneCanvas.getBoundingClientRect();
+  const scaleX = sceneCanvas.width / rect.width;
+  const scaleY = sceneCanvas.height / rect.height;
+  return {
+    x: (evt.clientX - rect.left) * scaleX,
+    y: (evt.clientY - rect.top) * scaleY,
+  };
+}
+
+function layerHandleRect(L) {
+  const size = 16;
+  const cx = L.x + L.canvas.width * L.scale;
+  const cy = L.y + L.canvas.height * L.scale;
+  return { x: cx - size / 2, y: cy - size / 2, size };
+}
+
+function pointInHandle(L, p) {
+  const r = layerHandleRect(L);
+  return p.x >= r.x && p.x <= r.x + r.size && p.y >= r.y && p.y <= r.y + r.size;
+}
+
+function pointInLayerBox(L, p) {
+  return (
+    p.x >= L.x &&
+    p.x <= L.x + L.canvas.width * L.scale &&
+    p.y >= L.y &&
+    p.y <= L.y + L.canvas.height * L.scale
+  );
+}
+
+function positionLayerOverlay() {
+  const wrapRect = canvasWrap.getBoundingClientRect();
+  const sceneRect = sceneCanvas.getBoundingClientRect();
+  layerOverlay.width = sceneCanvas.width;
+  layerOverlay.height = sceneCanvas.height;
+  layerOverlay.style.left = sceneRect.left - wrapRect.left + canvasWrap.scrollLeft + "px";
+  layerOverlay.style.top = sceneRect.top - wrapRect.top + canvasWrap.scrollTop + "px";
+  layerOverlay.style.width = sceneRect.width + "px";
+  layerOverlay.style.height = sceneRect.height + "px";
+}
+
+function drawLayerOverlay() {
+  layerCtx.clearRect(0, 0, layerOverlay.width, layerOverlay.height);
+  if (activeLayerIndex < 0) return;
+  const L = activeLayer();
+  const rect = sceneCanvas.getBoundingClientRect();
+  const bitmapToScreen = layerOverlay.width / (rect.width || layerOverlay.width);
+
+  layerCtx.save();
+  layerCtx.strokeStyle = "#22d3ee";
+  layerCtx.lineWidth = Math.max(1, 2 * bitmapToScreen);
+  layerCtx.setLineDash([6 * bitmapToScreen, 4 * bitmapToScreen]);
+  layerCtx.strokeRect(L.x, L.y, L.canvas.width * L.scale, L.canvas.height * L.scale);
+  layerCtx.restore();
+
+  const handle = layerHandleRect(L);
+  layerCtx.fillStyle = "#22d3ee";
+  layerCtx.fillRect(handle.x, handle.y, handle.size, handle.size);
+  layerCtx.strokeStyle = "#0c0f14";
+  layerCtx.lineWidth = Math.max(1, 1.5 * bitmapToScreen);
+  layerCtx.strokeRect(handle.x, handle.y, handle.size, handle.size);
+}
+
+function activateLayerTransform() {
+  if (activeLayerIndex < 0) return;
+  activeTool = "layerTransform";
+  layerTransformBtn.textContent = "Done Moving/Resizing";
+  brushCursor.hidden = true;
+  sceneCanvas.style.cursor = "move";
+  layerOverlay.hidden = false;
+  positionLayerOverlay();
+  drawLayerOverlay();
+  setStatus('Drag inside the box to move it, or the corner handle to resize. Click "Done" when finished.');
+}
+
+function deactivateLayerTransform() {
+  activeTool = "touchup";
+  layerDragMode = null;
+  layerTransformBtn.textContent = "Move / Resize Active Layer";
+  layerOverlay.hidden = true;
+  sceneCanvas.style.cursor = "";
+  layerCtx.clearRect(0, 0, layerOverlay.width, layerOverlay.height);
+  if (hasResult) {
+    setStatus('Pick Erase or Restore, then Brush (precise) or Magic Wand (click a whole same-color area) below.');
+  }
+}
+
+layerTransformBtn.addEventListener("click", () => {
+  if (activeTool === "layerTransform") {
+    deactivateLayerTransform();
+    return;
+  }
+  if (activeTool === "boxSelect") deactivateBoxSelect();
+  activateLayerTransform();
+});
+
 // ---------- Zoom ----------
 
 function applyZoom() {
   if (!hasImage) return;
-  const fitWidth = Math.min(canvasWrap.clientWidth, workingCanvas.width);
+  const fitWidth = Math.min(canvasWrap.clientWidth, sceneCanvas.width);
   const displayWidth = fitWidth * zoom;
-  const displayHeight = displayWidth * (workingCanvas.height / workingCanvas.width);
-  workingCanvas.style.width = displayWidth + "px";
-  workingCanvas.style.height = displayHeight + "px";
+  const displayHeight = displayWidth * (sceneCanvas.height / sceneCanvas.width);
+  sceneCanvas.style.width = displayWidth + "px";
+  sceneCanvas.style.height = displayHeight + "px";
   zoomIndicator.hidden = false;
   zoomIndicator.textContent = Math.round(zoom * 100) + "%";
   updateCursorSize();
   if (activeTool === "boxSelect") {
     positionSamOverlay();
     drawSamOverlay();
+  }
+  if (activeTool === "layerTransform") {
+    positionLayerOverlay();
+    drawLayerOverlay();
   }
 }
 
@@ -952,9 +1571,22 @@ canvasWrap.addEventListener(
 );
 
 zoomIndicator.addEventListener("click", resetZoom);
+
+// The sidebar scrolls internally so reaching lower panels never requires
+// scrolling the whole page -- max-height alone can't account for the
+// topbar's actual height (it varies with content/viewport), so this sizes
+// it to exactly what's left below wherever the sidebar naturally sits.
+const sidebarEl = document.querySelector(".sidebar");
+function fitSidebarHeight() {
+  const top = sidebarEl.getBoundingClientRect().top;
+  sidebarEl.style.maxHeight = Math.max(200, window.innerHeight - top - 20) + "px";
+}
+fitSidebarHeight();
+
 window.addEventListener("resize", () => {
   updateCursorSize();
   applyZoom();
+  fitSidebarHeight();
 });
 
 // ---------- Undo / redo / reset ----------
@@ -966,6 +1598,7 @@ undoBtn.addEventListener("click", () => {
   const prev = undoStack.pop();
   ctxWorking.putImageData(prev, 0, 0);
   updateUndoRedoButtons();
+  renderComposite();
 });
 
 redoBtn.addEventListener("click", () => {
@@ -975,6 +1608,7 @@ redoBtn.addEventListener("click", () => {
   const next = redoStack.pop();
   ctxWorking.putImageData(next, 0, 0);
   updateUndoRedoButtons();
+  renderComposite();
 });
 
 resetBtn.addEventListener("click", () => {
@@ -982,12 +1616,13 @@ resetBtn.addEventListener("click", () => {
   if (!confirm("Discard all touch-ups and reset to the AI result?")) return;
   pushUndo();
   ctxWorking.putImageData(baselineImageData, 0, 0);
+  renderComposite();
 });
 
 // ---------- Export / new image ----------
 
 downloadBtn.addEventListener("click", () => {
-  workingCanvas.toBlob((blob) => {
+  sceneCanvas.toBlob((blob) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -999,25 +1634,8 @@ downloadBtn.addEventListener("click", () => {
   }, "image/png");
 });
 
-newImageBtn.addEventListener("click", () => {
-  hasImage = false;
-  hasResult = false;
-  fileInput.value = "";
-  toolPanel.hidden = true;
-  exportPanel.hidden = true;
-  boxSelectPanel.hidden = true;
-  if (activeTool === "boxSelect") deactivateBoxSelect();
-  dropzone.style.display = "flex";
-  removeBgBtn.disabled = true;
-  ctxWorking.clearRect(0, 0, workingCanvas.width, workingCanvas.height);
-  workingCanvas.style.width = "";
-  workingCanvas.style.height = "";
-  zoom = 1;
-  zoomIndicator.hidden = true;
-  undoStack = [];
-  redoStack = [];
-  updateUndoRedoButtons();
-  setStatus("Choose an image to get started.");
-});
+newImageBtn.addEventListener("click", resetAllLayers);
 
 updateCursorSize();
+updateBoxSelectHint();
+renderLayerList();

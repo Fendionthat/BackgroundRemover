@@ -10,7 +10,7 @@ A background remover that runs entirely in your browser — no server, no API ke
 - **Erase** and **Restore**, each with two modes:
   - **Brush** — paints exactly where you drag. Precise, freehand.
   - **Magic Wand** — click once and it flood-fills outward through connected, similarly-colored original pixels, stopping at outlines. Great for flat-color backgrounds; switch back to Brush for spots where the wand grabs more than you want (e.g. two same-colored areas that turn out to be touching).
-- **Box Select** — Paint-3D-"Magic Select"-style interactive AI segmentation: drag a box around an object, click to add a point / Shift+click to remove one to refine the selection, then Apply. Uses the Erase/Restore choice above. Fully lazy — nothing is downloaded until you click "Start Box Select".
+- **Box Select** — Paint-3D-"Magic Select"-style interactive AI segmentation: drag a box around an object, click to add a point / Shift+click to remove one to refine the selection, then Apply. Usable either as a touch-up (using the Erase/Restore choice above) or, before "Remove Background", as an alternative manual way to cut out your subject. Drag from inside a selection to reposition it before applying, and check "Keep only this" to erase everything else on the canvas in the same step. Fully lazy — nothing is downloaded until you click "Start Box Select".
 - **Scroll-wheel zoom** with pan, anchored to the cursor, for pixel-level touch-ups.
 - **Undo/redo**, reset-to-AI-result, and PNG export.
 - Installable as a desktop app (see below) — no browser tabs or address bar.
