@@ -90,6 +90,23 @@
     <section class="panel" id="boxSelectPanel" hidden>
       <h2>3. Box Select</h2>
       <p class="hint">Drag a box around an object for an AI-precise selection. Click to add a point, Shift+Click to remove one, then Apply. Uses the Erase/Restore choice above.</p>
+
+      <details class="explain">
+        <summary>How does this work?</summary>
+        <dl>
+          <dt>What it is</dt>
+          <dd>A second, separate AI model (SlimSAM) that picks out one object at a time by its actual shape, not just its color -- useful where Magic Wand grabs too much or too little because the object doesn't have flat, uniform color.</dd>
+          <dt>Drag a box</dt>
+          <dd>Draw a rough box around the object. The AI finds its precise edges inside that box and shows the result as a highlighted preview -- nothing is applied to the image yet.</dd>
+          <dt>Refine with points</dt>
+          <dd>Click inside the highlighted area (or just outside it) to add a point that should be included; Shift+click to add a point that should be excluded. Each click quickly re-runs just the refinement step, not the whole analysis, so it stays responsive. Dragging a new box starts a fresh selection and clears previous points.</dd>
+          <dt>Apply / Cancel</dt>
+          <dd>Apply writes the current highlighted selection into the image, using whichever of Erase or Restore is selected above -- so this tool doesn't need its own Erase/Restore choice. Cancel discards the selection with no changes made. Either way it's a single undo-able step.</dd>
+          <dt>First use</dt>
+          <dd>This model is only downloaded the first time you click "Start Box Select" (a small one-time download, shown in the progress bar below) -- it's not part of the initial page load or Remove Background.</dd>
+        </dl>
+      </details>
+
       <button id="boxSelectToolBtn">Start Box Select</button>
       <div class="progress-wrap" id="samProgressWrap" hidden>
         <div class="progress-bar" id="samProgressBar"></div>
