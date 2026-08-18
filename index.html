@@ -87,8 +87,21 @@
       <button id="resetBtn">Reset to AI Result</button>
     </section>
 
+    <section class="panel" id="boxSelectPanel" hidden>
+      <h2>3. Box Select</h2>
+      <p class="hint">Drag a box around an object for an AI-precise selection. Click to add a point, Shift+Click to remove one, then Apply. Uses the Erase/Restore choice above.</p>
+      <button id="boxSelectToolBtn">Start Box Select</button>
+      <div class="progress-wrap" id="samProgressWrap" hidden>
+        <div class="progress-bar" id="samProgressBar"></div>
+      </div>
+      <div class="btn-row" id="boxSelectActions" hidden>
+        <button id="samApplyBtn" class="primary">Apply</button>
+        <button id="samCancelBtn">Cancel</button>
+      </div>
+    </section>
+
     <section class="panel" id="exportPanel" hidden>
-      <h2>3. Export</h2>
+      <h2>4. Export</h2>
       <button id="downloadBtn" class="primary">Download PNG</button>
       <button id="newImageBtn">Start Over With New Image</button>
     </section>
@@ -101,6 +114,7 @@
           <p>Drop an image here<br><span>or use "Choose Image"</span></p>
         </div>
         <canvas id="workingCanvas"></canvas>
+        <canvas id="samOverlay" hidden></canvas>
         <div class="brush-cursor" id="brushCursor" hidden></div>
       </div>
       <button class="zoom-indicator" id="zoomIndicator" title="Scroll to zoom. Click to reset to fit." hidden>100%</button>

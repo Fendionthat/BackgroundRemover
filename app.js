@@ -9,6 +9,15 @@ const progressWrap = document.getElementById("progressWrap");
 const progressBar = document.getElementById("progressBar");
 const toolPanel = document.getElementById("toolPanel");
 const exportPanel = document.getElementById("exportPanel");
+const boxSelectPanel = document.getElementById("boxSelectPanel");
+const boxSelectToolBtn = document.getElementById("boxSelectToolBtn");
+const samProgressWrap = document.getElementById("samProgressWrap");
+const samProgressBar = document.getElementById("samProgressBar");
+const boxSelectActions = document.getElementById("boxSelectActions");
+const samApplyBtn = document.getElementById("samApplyBtn");
+const samCancelBtn = document.getElementById("samCancelBtn");
+const samOverlay = document.getElementById("samOverlay");
+const samCtx = samOverlay.getContext("2d");
 const eraseToolBtn = document.getElementById("eraseToolBtn");
 const restoreToolBtn = document.getElementById("restoreToolBtn");
 const brushModeBtn = document.getElementById("brushModeBtn");
@@ -57,6 +66,24 @@ let originalImageData = null;
 let fillVisited = null;
 let fillGen = 0;
 let strokeImageData = null;
+
+let activeTool = "touchup"; // "touchup" | "boxSelect"
+let samModule = null; // { SamModel, AutoProcessor, RawImage, Tensor, env }
+let samModel = null;
+let samProcessor = null;
+let samLoadingPromise = null;
+let samImageVersion = 0;
+let samEmbeddingsVersion = -1;
+let samImageProcessed = null;
+let samImageEmbeddings = null;
+let samBox = null; // {x0,y0,x1,y1} in original-image pixel space
+let samPoints = []; // [{x, y, label}]
+let samMask = null; // Uint8Array, one byte per pixel, original-image resolution
+let samDragStart = null;
+let samDragging = false;
+let samMoved = false;
+let samBusy = false;
+let samPromptQueued = false;
 
 let zoom = 1;
 const ZOOM_MIN = 0.1;
@@ -116,6 +143,9 @@ async function loadImageFile(file) {
   baselineImageData = null;
   toolPanel.hidden = true;
   exportPanel.hidden = true;
+  boxSelectPanel.hidden = true;
+  if (activeTool === "boxSelect") deactivateBoxSelect();
+  samImageVersion++;
   dropzone.style.display = "none";
   removeBgBtn.disabled = false;
   updateUndoRedoButtons();
@@ -185,6 +215,7 @@ removeBgBtn.addEventListener("click", async () => {
     hasResult = true;
     toolPanel.hidden = false;
     exportPanel.hidden = false;
+    boxSelectPanel.hidden = false;
     updateUndoRedoButtons();
     applyZoom();
     setStatus('Background removed. Pick Erase or Restore, then Brush (precise) or Magic Wand (click a whole same-color area) below.');
@@ -458,6 +489,18 @@ function updateUndoRedoButtons() {
 }
 
 workingCanvas.addEventListener("pointerdown", (e) => {
+  if (activeTool === "boxSelect") {
+    if (!hasResult) return;
+    try {
+      workingCanvas.setPointerCapture(e.pointerId);
+    } catch {
+      // some input sources (synthetic events, certain stylus drivers) don't support capture; drawing still works without it
+    }
+    samDragStart = getCanvasPoint(e);
+    samDragging = true;
+    samMoved = false;
+    return;
+  }
   if (!hasResult) return;
   try {
     workingCanvas.setPointerCapture(e.pointerId);
@@ -478,6 +521,15 @@ let lastPointerEvent = null;
 
 workingCanvas.addEventListener("pointermove", (e) => {
   lastPointerEvent = e;
+  if (activeTool === "boxSelect") {
+    if (samDragging) {
+      const p = getCanvasPoint(e);
+      if (Math.abs(p.x - samDragStart.x) > 3 || Math.abs(p.y - samDragStart.y) > 3) samMoved = true;
+      samBox = normalizeBox(samDragStart, p);
+      drawSamOverlay();
+    }
+    return;
+  }
   updateCursorPosition(e);
   if (!isDrawing) return;
   const p = getCanvasPoint(e);
@@ -486,16 +538,31 @@ workingCanvas.addEventListener("pointermove", (e) => {
 
 canvasWrap.addEventListener("scroll", () => {
   if (lastPointerEvent) updateCursorPosition(lastPointerEvent);
+  if (activeTool === "boxSelect") positionSamOverlay();
 });
 
-window.addEventListener("pointerup", () => {
+window.addEventListener("pointerup", (e) => {
+  if (activeTool === "boxSelect") {
+    if (samDragging) {
+      samDragging = false;
+      if (samMoved && samBox) {
+        samPoints = [];
+        runSamPrompt();
+      } else if (!samMoved && samBox) {
+        const p = getCanvasPoint(e);
+        samPoints.push({ x: p.x, y: p.y, label: e.shiftKey ? 0 : 1 });
+        runSamPrompt();
+      }
+    }
+    return;
+  }
   isDrawing = false;
   lastPoint = null;
   strokeImageData = null;
 });
 
 canvasWrap.addEventListener("pointerenter", () => {
-  if (hasResult) brushCursor.hidden = false;
+  if (hasResult && activeTool !== "boxSelect") brushCursor.hidden = false;
 });
 canvasWrap.addEventListener("pointerleave", () => {
   brushCursor.hidden = true;
@@ -518,6 +585,323 @@ function updateCursorSize() {
   brushCursor.style.height = displaySize + "px";
 }
 
+// ---------- Box Select (SAM) ----------
+//
+// Lazy-loaded entirely on first "Start Box Select" click -- nothing here is
+// fetched during page load or Remove Background. Uses SlimSAM (a small
+// interactive segmentation model, vendored under vendor/sam/) via
+// transformers.js (vendored under vendor/transformers/), independent of the
+// isnet background-removal pipeline above. The expensive image-embedding
+// pass runs once per source photo (cached, keyed by samImageVersion); box
+// drags and point clicks only re-run the fast decoder.
+
+function ensureSamLoaded() {
+  if (samModel && samProcessor) return Promise.resolve();
+  if (!samLoadingPromise) {
+    samLoadingPromise = loadSam().catch((err) => {
+      samLoadingPromise = null; // allow retrying after a failed load
+      throw err;
+    });
+  }
+  return samLoadingPromise;
+}
+
+async function loadSam() {
+  samProgressWrap.hidden = false;
+  samProgressBar.style.width = "0%";
+  setStatus("Loading Box Select model… (one-time ~24MB download, cached after this)");
+
+  const mod = await import("./vendor/transformers/transformers.js");
+  const { SamModel, AutoProcessor, env } = mod;
+
+  env.allowLocalModels = true;
+  env.allowRemoteModels = false;
+  env.localModelPath = new URL("./vendor/", import.meta.url).toString();
+  env.backends.onnx.wasm.wasmPaths = {
+    mjs: new URL("./vendor/onnxruntime-web-sam/ort-wasm-simd-threaded.mjs", import.meta.url).href,
+    wasm: new URL("./vendor/onnxruntime-web-sam/ort-wasm-simd-threaded.wasm", import.meta.url).href,
+  };
+
+  const progressState = new Map();
+  const onProgress = (data) => {
+    if (data.status !== "progress" || !data.total) return;
+    progressState.set(data.file, { loaded: data.loaded, total: data.total });
+    let loaded = 0, total = 0;
+    for (const v of progressState.values()) {
+      loaded += v.loaded;
+      total += v.total;
+    }
+    if (total) samProgressBar.style.width = Math.round((loaded / total) * 100) + "%";
+  };
+
+  const [model, processor] = await Promise.all([
+    SamModel.from_pretrained("sam", { dtype: "q8", device: "wasm", progress_callback: onProgress }),
+    AutoProcessor.from_pretrained("sam", { progress_callback: onProgress }),
+  ]);
+
+  samModule = mod;
+  samModel = model;
+  samProcessor = processor;
+  samProgressWrap.hidden = true;
+}
+
+async function ensureSamEmbeddings() {
+  if (samEmbeddingsVersion === samImageVersion && samImageEmbeddings) return;
+  setStatus("Analyzing image for Box Select…");
+  const { RawImage } = samModule;
+  const image = await RawImage.read(originalCanvas);
+  samImageProcessed = await samProcessor(image);
+  samImageEmbeddings = await samModel.get_image_embeddings(samImageProcessed);
+  samEmbeddingsVersion = samImageVersion;
+}
+
+function activateBoxSelect() {
+  activeTool = "boxSelect";
+  samBox = null;
+  samPoints = [];
+  samMask = null;
+  boxSelectToolBtn.textContent = "Cancel Box Select";
+  boxSelectActions.hidden = true;
+  brushCursor.hidden = true;
+  workingCanvas.style.cursor = "crosshair";
+  samOverlay.hidden = false;
+  positionSamOverlay();
+  clearSamOverlay();
+  setStatus("Drag a box around the object you want to select.");
+}
+
+function deactivateBoxSelect() {
+  activeTool = "touchup";
+  samBox = null;
+  samPoints = [];
+  samMask = null;
+  samDragging = false;
+  samDragStart = null;
+  boxSelectToolBtn.textContent = "Start Box Select";
+  boxSelectActions.hidden = true;
+  samOverlay.hidden = true;
+  workingCanvas.style.cursor = "";
+  clearSamOverlay();
+  if (hasResult) {
+    setStatus('Pick Erase or Restore, then Brush (precise) or Magic Wand (click a whole same-color area) below.');
+  }
+}
+
+boxSelectToolBtn.addEventListener("click", async () => {
+  if (activeTool === "boxSelect") {
+    deactivateBoxSelect();
+    return;
+  }
+  if (!hasResult) return;
+  boxSelectToolBtn.disabled = true;
+  try {
+    await ensureSamLoaded();
+  } catch (err) {
+    console.error(err);
+    setStatus("Couldn't load Box Select: " + err.message);
+    samProgressWrap.hidden = true;
+    boxSelectToolBtn.disabled = false;
+    return;
+  }
+  boxSelectToolBtn.disabled = false;
+  activateBoxSelect();
+});
+
+function normalizeBox(a, b) {
+  const w = workingCanvas.width, h = workingCanvas.height;
+  return {
+    x0: Math.max(0, Math.min(a.x, b.x)),
+    y0: Math.max(0, Math.min(a.y, b.y)),
+    x1: Math.min(w, Math.max(a.x, b.x)),
+    y1: Math.min(h, Math.max(a.y, b.y)),
+  };
+}
+
+function centerPointOf(box) {
+  return { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2, label: 1 };
+}
+
+function positionSamOverlay() {
+  const wrapRect = canvasWrap.getBoundingClientRect();
+  const canvasRect = workingCanvas.getBoundingClientRect();
+  samOverlay.width = workingCanvas.width;
+  samOverlay.height = workingCanvas.height;
+  samOverlay.style.left = canvasRect.left - wrapRect.left + canvasWrap.scrollLeft + "px";
+  samOverlay.style.top = canvasRect.top - wrapRect.top + canvasWrap.scrollTop + "px";
+  samOverlay.style.width = canvasRect.width + "px";
+  samOverlay.style.height = canvasRect.height + "px";
+}
+
+function clearSamOverlay() {
+  samCtx.clearRect(0, 0, samOverlay.width, samOverlay.height);
+}
+
+function drawSamOverlay() {
+  clearSamOverlay();
+  const w = samOverlay.width, h = samOverlay.height;
+
+  if (samMask) {
+    const imgData = samCtx.createImageData(w, h);
+    const px = imgData.data;
+    for (let i = 0; i < w * h; i++) {
+      if (samMask[i]) {
+        const p = i * 4;
+        px[p] = 34;
+        px[p + 1] = 211;
+        px[p + 2] = 238;
+        px[p + 3] = 115;
+      }
+    }
+    samCtx.putImageData(imgData, 0, 0);
+  }
+
+  const rect = workingCanvas.getBoundingClientRect();
+  const bitmapToScreen = w / (rect.width || w);
+
+  if (samBox) {
+    samCtx.save();
+    samCtx.strokeStyle = "#22d3ee";
+    samCtx.lineWidth = Math.max(1, 2 * bitmapToScreen);
+    samCtx.setLineDash([6 * bitmapToScreen, 4 * bitmapToScreen]);
+    samCtx.strokeRect(samBox.x0, samBox.y0, samBox.x1 - samBox.x0, samBox.y1 - samBox.y0);
+    samCtx.restore();
+  }
+
+  const markerR = Math.max(4, 6 * bitmapToScreen);
+  for (const pt of samPoints) {
+    samCtx.beginPath();
+    samCtx.arc(pt.x, pt.y, markerR, 0, Math.PI * 2);
+    samCtx.fillStyle = pt.label === 1 ? "#22d3ee" : "#ff6b6b";
+    samCtx.fill();
+    samCtx.strokeStyle = "#0c0f14";
+    samCtx.lineWidth = Math.max(1, 1.5 * bitmapToScreen);
+    samCtx.stroke();
+  }
+}
+
+async function runSamPrompt() {
+  if (samBusy) {
+    samPromptQueued = true;
+    return;
+  }
+  samBusy = true;
+  try {
+    await ensureSamEmbeddings();
+    const { Tensor } = samModule;
+    const points = samPoints.length ? samPoints : samBox ? [centerPointOf(samBox)] : [];
+    if (!points.length) return;
+
+    const inputPointsTensor = samProcessor.reshape_input_points(
+      [points.map((p) => [p.x, p.y])],
+      samImageProcessed.original_sizes,
+      samImageProcessed.reshaped_input_sizes
+    );
+    const inputLabelsTensor = new Tensor(
+      "int64",
+      points.map((p) => BigInt(p.label)),
+      [1, 1, points.length]
+    );
+
+    const decodeInputs = {
+      ...samImageEmbeddings,
+      input_points: inputPointsTensor,
+      input_labels: inputLabelsTensor,
+    };
+    if (samBox) {
+      decodeInputs.input_boxes = samProcessor.reshape_input_points(
+        [[[samBox.x0, samBox.y0, samBox.x1, samBox.y1]]],
+        samImageProcessed.original_sizes,
+        samImageProcessed.reshaped_input_sizes,
+        true
+      );
+    }
+
+    const { pred_masks, iou_scores } = await samModel(decodeInputs);
+    const masks = await samProcessor.post_process_masks(
+      pred_masks,
+      samImageProcessed.original_sizes,
+      samImageProcessed.reshaped_input_sizes
+    );
+
+    const { RawImage } = samModule;
+    const maskImage = RawImage.fromTensor(masks[0][0]);
+    const scores = iou_scores.data;
+    let bestIndex = 0;
+    for (let i = 1; i < scores.length; i++) {
+      if (scores[i] > scores[bestIndex]) bestIndex = i;
+    }
+    const numMasks = scores.length;
+    const mw = maskImage.width, mh = maskImage.height;
+    const maskArr = new Uint8Array(mw * mh);
+    for (let i = 0; i < mw * mh; i++) {
+      maskArr[i] = maskImage.data[numMasks * i + bestIndex] === 1 ? 1 : 0;
+    }
+    samMask = maskArr;
+    boxSelectActions.hidden = false;
+    drawSamOverlay();
+    setStatus(`Selection ready (score ${scores[bestIndex].toFixed(2)}). Click to add, Shift+Click to remove, or Apply.`);
+  } catch (err) {
+    console.error(err);
+    setStatus("Box Select error: " + err.message);
+  } finally {
+    samBusy = false;
+    if (samPromptQueued) {
+      samPromptQueued = false;
+      runSamPrompt();
+    }
+  }
+}
+
+samApplyBtn.addEventListener("click", () => {
+  if (!samMask) return;
+  const w = workingCanvas.width, h = workingCanvas.height;
+  let minX = w, minY = h, maxX = -1, maxY = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (samMask[y * w + x]) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < minX) {
+    deactivateBoxSelect();
+    return;
+  }
+
+  pushUndo();
+  const snap = ctxWorking.getImageData(0, 0, w, h);
+  const buf = snap.data;
+  const orig = originalImageData.data;
+  const erase = currentTool === "erase";
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const i = y * w + x;
+      if (!samMask[i]) continue;
+      const p = i * 4;
+      if (erase) {
+        buf[p] = 0;
+        buf[p + 1] = 0;
+        buf[p + 2] = 0;
+        buf[p + 3] = 0;
+      } else {
+        buf[p] = orig[p];
+        buf[p + 1] = orig[p + 1];
+        buf[p + 2] = orig[p + 2];
+        buf[p + 3] = orig[p + 3];
+      }
+    }
+  }
+  ctxWorking.putImageData(snap, 0, 0, minX, minY, maxX - minX + 1, maxY - minY + 1);
+  deactivateBoxSelect();
+});
+
+samCancelBtn.addEventListener("click", () => {
+  deactivateBoxSelect();
+});
+
 // ---------- Zoom ----------
 
 function applyZoom() {
@@ -530,6 +914,10 @@ function applyZoom() {
   zoomIndicator.hidden = false;
   zoomIndicator.textContent = Math.round(zoom * 100) + "%";
   updateCursorSize();
+  if (activeTool === "boxSelect") {
+    positionSamOverlay();
+    drawSamOverlay();
+  }
 }
 
 function resetZoom() {
@@ -617,6 +1005,8 @@ newImageBtn.addEventListener("click", () => {
   fileInput.value = "";
   toolPanel.hidden = true;
   exportPanel.hidden = true;
+  boxSelectPanel.hidden = true;
+  if (activeTool === "boxSelect") deactivateBoxSelect();
   dropzone.style.display = "flex";
   removeBgBtn.disabled = true;
   ctxWorking.clearRect(0, 0, workingCanvas.width, workingCanvas.height);

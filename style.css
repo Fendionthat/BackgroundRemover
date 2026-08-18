@@ -360,6 +360,14 @@ input[type="range"] {
   mix-blend-mode: difference;
 }
 
+#samOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
 @media (max-width: 760px) {
   .app {
     grid-template-columns: 1fr;

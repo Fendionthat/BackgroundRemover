@@ -10,6 +10,7 @@ A background remover that runs entirely in your browser — no server, no API ke
 - **Erase** and **Restore**, each with two modes:
   - **Brush** — paints exactly where you drag. Precise, freehand.
   - **Magic Wand** — click once and it flood-fills outward through connected, similarly-colored original pixels, stopping at outlines. Great for flat-color backgrounds; switch back to Brush for spots where the wand grabs more than you want (e.g. two same-colored areas that turn out to be touching).
+- **Box Select** — Paint-3D-"Magic Select"-style interactive AI segmentation: drag a box around an object, click to add a point / Shift+click to remove one to refine the selection, then Apply. Uses the Erase/Restore choice above. Fully lazy — nothing is downloaded until you click "Start Box Select".
 - **Scroll-wheel zoom** with pan, anchored to the cursor, for pixel-level touch-ups.
 - **Undo/redo**, reset-to-AI-result, and PNG export.
 - Installable as a desktop app (see below) — no browser tabs or address bar.
@@ -50,6 +51,9 @@ vendor/                   # vendored background-removal library + model weights 
   background-removal.bundle.mjs   # the library, fully self-contained
   shims/                          # small Node.js API shims the library needs in-browser
   model-data/                     # ONNX models + ONNX Runtime WASM, split into chunk files
+  sam/                            # SlimSAM ONNX weights, used by Box Select (lazy-loaded)
+  transformers/                   # transformers.js, runs the Box Select model
+  onnxruntime-web-sam/            # Box Select's own ONNX Runtime WASM build
 ```
 
 To change the icon artwork: replace `icons/cirno-source.png`, open `http://localhost:8000/scripts/build-icon.html`, download the three regenerated sizes into `icons/`, then run `python scripts/gen_ico.py` to rebuild `app.ico`.
@@ -63,6 +67,10 @@ By default this library fetches its ONNX model and WASM runtime from IMG.LY's CD
 `vendor/model-data/` has `isnet`, the library's full-precision model (~176MB) — set via `model: "isnet"` in the `removeBackground()` call in `app.js`. The library's own default, `isnet_fp16` (~88MB, noticeably rougher edges), isn't vendored here; the [`legacy` tag](../../tree/legacy) has it if you ever want to go back to it.
 
 If you want a different variant (`isnet_fp16` / `isnet_quint8`) or GPU (WebGPU) execution, you'd need to fetch those files the same way: read the manifest at `https://staticimgly.com/@imgly/background-removal-data/1.5.7/dist/resources.json`, download the chunks for the model key you want, merge that entry into `vendor/model-data/resources.json`, and set `model`/`device` accordingly.
+
+### Box Select's model (separate from the above)
+
+Box Select uses a second, independent AI model: [SlimSAM](https://huggingface.co/Xenova/slimsam-77-uniform) (a small interactive segmentation model), run via [transformers.js](https://github.com/huggingface/transformers.js) — both vendored locally the same way as isnet (`vendor/sam/`, `vendor/transformers/`, and its own ONNX Runtime WASM build under `vendor/onnxruntime-web-sam/`, kept separate from `vendor/model-data`'s copy since it's a different pinned version). It's quantized (~14MB of weights) and, unlike isnet, is **not** fetched on page load or during Remove Background — it only downloads the first time you click "Start Box Select" in a session, showing the same sidebar progress bar.
 
 ## How Magic Wand mode works
 
