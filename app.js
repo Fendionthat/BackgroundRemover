@@ -5,6 +5,8 @@ const UNDO_LIMIT = 15;
 
 const fileInput = document.getElementById("fileInput");
 const removeBgBtn = document.getElementById("removeBgBtn");
+const progressWrap = document.getElementById("progressWrap");
+const progressBar = document.getElementById("progressBar");
 const toolPanel = document.getElementById("toolPanel");
 const exportPanel = document.getElementById("exportPanel");
 const eraseToolBtn = document.getElementById("eraseToolBtn");
@@ -32,11 +34,6 @@ const dropzone = document.getElementById("dropzone");
 const workingCanvas = document.getElementById("workingCanvas");
 const brushCursor = document.getElementById("brushCursor");
 const statusEl = document.getElementById("status");
-const loadingOverlay = document.getElementById("loadingOverlay");
-const loadingTitle = document.getElementById("loadingTitle");
-const loadingSubtext = document.getElementById("loadingSubtext");
-const loadingProgressBar = document.getElementById("loadingProgressBar");
-const loadingPercent = document.getElementById("loadingPercent");
 
 const ctxWorking = workingCanvas.getContext("2d", { willReadFrequently: true });
 
@@ -150,62 +147,13 @@ canvasWrap.addEventListener("drop", (e) => {
 
 // ---------- Background removal ----------
 
-// Human-friendly labels for the resources the library fetches, keyed by
-// the tail of the progress callback's `key` (e.g. "fetch:/models/isnet").
-const RESOURCE_LABELS = {
-  "/models/isnet": "Downloading the AI model",
-  "/onnxruntime-web/ort-wasm-simd-threaded.wasm": "Downloading the AI runtime",
-  "/onnxruntime-web/ort-wasm-simd-threaded.mjs": "Downloading the AI runtime",
-};
-
-function formatMB(bytes) {
-  return (bytes / (1024 * 1024)).toFixed(0);
-}
-
-function showLoadingOverlay() {
-  loadingTitle.textContent = "Getting things ready…";
-  loadingSubtext.textContent = "One moment.";
-  loadingProgressBar.style.width = "0%";
-  loadingPercent.textContent = "";
-  loadingOverlay.hidden = false;
-}
-
-function hideLoadingOverlay() {
-  loadingOverlay.hidden = true;
-}
-
-// Tracks bytes seen per resource key so the overlay can show one combined
-// percentage across every file being fetched, instead of jumping between
-// separate per-file percentages.
-const downloadProgress = new Map();
-
-function updateLoadingProgress(key, current, total) {
-  if (!total) return;
-  const resourceKey = key.replace(/^fetch:/, "");
-  downloadProgress.set(resourceKey, { current, total });
-
-  let sumCurrent = 0;
-  let sumTotal = 0;
-  for (const { current: c, total: t } of downloadProgress.values()) {
-    sumCurrent += c;
-    sumTotal += t;
-  }
-  const pct = Math.round((sumCurrent / sumTotal) * 100);
-
-  loadingTitle.textContent = RESOURCE_LABELS[resourceKey] || "Downloading…";
-  loadingSubtext.textContent =
-    "One-time download — cached after this, so every removal after your first will be instant.";
-  loadingProgressBar.style.width = pct + "%";
-  loadingPercent.textContent = `${pct}% (${formatMB(sumCurrent)} / ${formatMB(sumTotal)} MB)`;
-}
-
 removeBgBtn.addEventListener("click", async () => {
   if (!hasImage) return;
   removeBgBtn.disabled = true;
   fileInput.disabled = true;
-  downloadProgress.clear();
-  showLoadingOverlay();
-  setStatus("Removing background…");
+  progressWrap.hidden = false;
+  progressBar.style.width = "0%";
+  setStatus("Downloading model & removing background… (first run may take a bit)");
 
   try {
     const sourceBlob = await new Promise((resolve) =>
@@ -219,13 +167,13 @@ removeBgBtn.addEventListener("click", async () => {
       // vendored in vendor/model-data/ -- switching models means fetching
       // that model's chunks too (see the README).
       model: "isnet",
-      progress: updateLoadingProgress,
+      progress: (key, current, total) => {
+        if (total) {
+          const pct = Math.round((current / total) * 100);
+          progressBar.style.width = pct + "%";
+        }
+      },
     });
-
-    loadingTitle.textContent = "Analyzing image…";
-    loadingSubtext.textContent = "Almost done.";
-    loadingProgressBar.style.width = "100%";
-    loadingPercent.textContent = "";
 
     const bitmap = await createImageBitmap(resultBlob);
     ctxWorking.clearRect(0, 0, workingCanvas.width, workingCanvas.height);
@@ -246,7 +194,7 @@ removeBgBtn.addEventListener("click", async () => {
   } finally {
     removeBgBtn.disabled = false;
     fileInput.disabled = false;
-    hideLoadingOverlay();
+    progressWrap.hidden = true;
   }
 });
 
