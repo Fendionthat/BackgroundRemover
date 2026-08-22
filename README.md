@@ -2,17 +2,18 @@
 
 *Cirno loves ts. 🤤*
 
-A background remover that runs entirely in your browser — no server, no API keys, no image ever leaves your machine, and no external services to depend on — plus a manual touch-up brush for the spots the AI gets wrong.
+A layer-based photo editor that runs entirely in your browser — no server, no API keys, no image ever leaves your machine, and no external services to depend on — built around cutting out subjects by hand (with AI help) and composing them, plus text, into one image.
 
 ## Features
 
-- **One-click background removal**, powered by [`@imgly/background-removal`](https://github.com/imgly/background-removal-js), an ONNX/WASM segmentation model that runs client-side. The library and the model weights are vendored directly in this repo under `vendor/` — nothing is fetched from a CDN at runtime, so this keeps working regardless of what happens to any third-party service, indefinitely.
+- **Layers** — drag in as many photos as you want, each its own layer with its own undo history. Move, resize, reorder (drag its handle to send it forward/back), and delete each one independently. Everything flattens together on export.
+- **Text layers** — add text anywhere in the stack, over or under your photos, with adjustable font, size, and color.
+- **Box Select** — Paint-3D-"Magic Select"-style interactive AI segmentation: drag a box around an object, click to add a point / Shift+click to remove one to refine the selection, then Apply. Works on a fresh photo right away — no other step needed first. Drag from inside a selection to reposition it before applying, and check "Keep only this" to erase everything else on the canvas in the same step. Fully lazy — nothing is downloaded until you pick the Box Select tool.
 - **Erase** and **Restore**, each with two modes:
   - **Brush** — paints exactly where you drag. Precise, freehand.
   - **Magic Wand** — click once and it flood-fills outward through connected, similarly-colored original pixels, stopping at outlines. Great for flat-color backgrounds; switch back to Brush for spots where the wand grabs more than you want (e.g. two same-colored areas that turn out to be touching).
-- **Box Select** — Paint-3D-"Magic Select"-style interactive AI segmentation: drag a box around an object, click to add a point / Shift+click to remove one to refine the selection, then Apply. Usable either as a touch-up (using the Erase/Restore choice above) or, before "Remove Background", as an alternative manual way to cut out your subject. Drag from inside a selection to reposition it before applying, and check "Keep only this" to erase everything else on the canvas in the same step. Fully lazy — nothing is downloaded until you click "Start Box Select".
 - **Scroll-wheel zoom** with pan, anchored to the cursor, for pixel-level touch-ups.
-- **Undo/redo**, reset-to-AI-result, and PNG export.
+- **Undo/redo** and PNG export (the full composited layer stack).
 - Installable as a desktop app (see below) — no browser tabs or address bar.
 
 ## Running it
@@ -47,10 +48,7 @@ icons/                    # app icons (PNG + Windows .ico) and their source art
   app.ico                         # Windows shortcut icon, packed from the PNGs above
 scripts/build-icon.html    # regenerates icon-*.png from icons/cirno-source.png (open via the local server)
 scripts/gen_ico.py         # packs icon-*.png into icons/app.ico
-vendor/                   # vendored background-removal library + model weights (no CDN dependency)
-  background-removal.bundle.mjs   # the library, fully self-contained
-  shims/                          # small Node.js API shims the library needs in-browser
-  model-data/                     # ONNX models + ONNX Runtime WASM, split into chunk files
+vendor/                   # vendored Box Select model + runtime (no CDN dependency)
   sam/                            # SlimSAM ONNX weights, used by Box Select (lazy-loaded)
   transformers/                   # transformers.js, runs the Box Select model
   onnxruntime-web-sam/            # Box Select's own ONNX Runtime WASM build
@@ -60,17 +58,7 @@ To change the icon artwork: replace `icons/cirno-source.png`, open `http://local
 
 ### Why the model is vendored instead of loaded from a CDN
 
-By default this library fetches its ONNX model and WASM runtime from IMG.LY's CDN on first use. That's fine for a quick demo, but it means the app's core feature stops working forever if that CDN ever goes away — not something you want in a tool you're keeping around long-term. Vendoring the files this app uses means it has zero external runtime dependencies: it'll keep working exactly as-is no matter what happens on the internet.
-
-### Which model is vendored
-
-`vendor/model-data/` has `isnet`, the library's full-precision model (~176MB) — set via `model: "isnet"` in the `removeBackground()` call in `app.js`. The library's own default, `isnet_fp16` (~88MB, noticeably rougher edges), isn't vendored here; the [`legacy` tag](../../tree/legacy) has it if you ever want to go back to it.
-
-If you want a different variant (`isnet_fp16` / `isnet_quint8`) or GPU (WebGPU) execution, you'd need to fetch those files the same way: read the manifest at `https://staticimgly.com/@imgly/background-removal-data/1.5.7/dist/resources.json`, download the chunks for the model key you want, merge that entry into `vendor/model-data/resources.json`, and set `model`/`device` accordingly.
-
-### Box Select's model (separate from the above)
-
-Box Select uses a second, independent AI model: [SlimSAM](https://huggingface.co/Xenova/slimsam-77-uniform) (a small interactive segmentation model), run via [transformers.js](https://github.com/huggingface/transformers.js) — both vendored locally the same way as isnet (`vendor/sam/`, `vendor/transformers/`, and its own ONNX Runtime WASM build under `vendor/onnxruntime-web-sam/`, kept separate from `vendor/model-data`'s copy since it's a different pinned version). It's quantized (~14MB of weights) and, unlike isnet, is **not** fetched on page load or during Remove Background — it only downloads the first time you click "Start Box Select" in a session, showing the same sidebar progress bar.
+Box Select's model ([SlimSAM](https://huggingface.co/Xenova/slimsam-77-uniform), run via [transformers.js](https://github.com/huggingface/transformers.js)) is vendored directly in this repo instead of fetched from a CDN, so the app keeps working exactly as-is no matter what happens to any third-party service — zero external runtime dependencies. It's quantized (~14MB of weights) and lazy: nothing is downloaded until you actually pick the Box Select tool, shown with a sidebar progress bar.
 
 ## How Magic Wand mode works
 
@@ -78,7 +66,7 @@ On click/drag it seeds a small area at the brush position, then flood-fills outw
 
 ## Credits
 
-Background segmentation by [IMG.LY's `@imgly/background-removal`](https://github.com/imgly/background-removal-js) (vendored in `vendor/`) — check their repo for its license terms if you plan to use this beyond personal use.
+Object segmentation by [SlimSAM](https://huggingface.co/Xenova/slimsam-77-uniform) via [transformers.js](https://github.com/huggingface/transformers.js) (vendored in `vendor/`).
 
 
 Btw if the app doesnt work for SOME REASON.... paste this in ur browser lmfao http://localhost:8000/

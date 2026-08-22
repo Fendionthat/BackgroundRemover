@@ -22,6 +22,9 @@
   <div class="topbar-actions">
     <button id="undoBtn" disabled title="Undo">↺ Undo</button>
     <button id="redoBtn" disabled title="Redo">↻ Redo</button>
+    <label class="theme-picker" title="Theme color">
+      <input type="color" id="themeColorInput" value="#22d3ee">
+    </label>
   </div>
   <a class="github-link" href="https://github.com/Fendionthat/BackgroundRemover" target="_blank" rel="noopener">
     <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true">
@@ -39,106 +42,100 @@
         Choose Image
         <input type="file" id="fileInput" accept="image/*" hidden>
       </label>
-      <button id="removeBgBtn" class="primary" disabled>Remove Background</button>
-      <div class="progress-wrap" id="progressWrap" hidden>
-        <div class="progress-bar" id="progressBar"></div>
-      </div>
-    </section>
-
-    <section class="panel" id="layersPanel" hidden>
-      <h2>2. Layers</h2>
-      <p class="hint">Drag in another photo (or use the button below) to add it as a new layer. Click a layer to make it active -- Remove Background, Box Select, and Touch Up all apply to whichever layer is active.</p>
-      <div id="layerList"></div>
-      <label class="file-btn">
-        + Add Photo Layer
-        <input type="file" id="addLayerInput" accept="image/*" hidden>
-      </label>
-      <button id="layerTransformBtn">Move / Resize Active Layer</button>
     </section>
 
     <section class="panel" id="toolPanel" hidden>
-      <h2>3. Touch Up</h2>
+      <h2>2. Tools</h2>
+
       <div class="tool-toggle">
         <button class="tool-btn active" id="eraseToolBtn" data-tool="erase">Erase</button>
         <button class="tool-btn" id="restoreToolBtn" data-tool="restore">Restore</button>
       </div>
-      <div class="tool-toggle mode-toggle">
-        <button class="tool-btn active" id="brushModeBtn" data-mode="brush">Brush</button>
-        <button class="tool-btn" id="magicModeBtn" data-mode="magic">Magic Wand</button>
+
+      <div class="tool-toggle tool-row-4">
+        <button class="tool-btn active" id="brushModeBtn">Brush</button>
+        <button class="tool-btn" id="magicModeBtn">Magic Wand</button>
+        <button class="tool-btn" id="boxSelectToolBtn">Box Select</button>
+        <button class="tool-btn" id="layerTransformBtn">Move Layer</button>
       </div>
+
       <p class="hint" id="toolHint">Erase paints transparent with a soft brush — good for freehand cleanup.</p>
 
-      <label class="slider-label">Brush size <span id="brushSizeVal">40</span>px</label>
-      <input type="range" id="brushSize" min="4" max="200" value="40">
+      <div id="brushControls">
+        <label class="slider-label">Brush size <span id="brushSizeVal">40</span>px</label>
+        <input type="range" id="brushSize" min="4" max="200" value="40">
 
-      <label class="slider-label" id="softnessRow">Softness <span id="softnessVal">50</span>%</label>
-      <input type="range" id="softness" min="0" max="100" value="50">
+        <label class="slider-label" id="softnessRow">Softness <span id="softnessVal">50</span>%</label>
+        <input type="range" id="softness" min="0" max="100" value="50">
 
-      <label class="slider-label" id="toleranceRow">Magic wand tolerance <span id="toleranceVal">8</span>%</label>
-      <input type="range" id="tolerance" min="0" max="100" value="8">
+        <label class="slider-label" id="toleranceRow">Magic wand tolerance <span id="toleranceVal">8</span>%</label>
+        <input type="range" id="tolerance" min="0" max="100" value="8">
 
-      <details class="explain">
-        <summary>What do these mean?</summary>
-        <dl>
-          <dt>Erase / Restore</dt>
-          <dd>Erase paints transparent; Restore brings pixels back from the original image. Both work in either Brush or Magic Wand mode below.</dd>
-          <dt>Brush mode</dt>
-          <dd>Paints exactly where you drag, nothing more. Good for freehand touch-ups, or for precise spots where Magic Wand grabs too much (e.g. two same-color areas that turn out to be touching, like a skirt and shirt of the same white).</dd>
-          <dt>Magic Wand mode</dt>
-          <dd>Click once and it grows through the whole connected area of similar color, stopping at outlines. Great for flat-color art — but if two parts of the subject share a color AND touch with no outline between them, it'll follow that connection further than you want. If that happens, undo and switch to Brush mode, or lower the tolerance.</dd>
-          <dt>Brush size</dt>
-          <dd>How big an area each click/drag touches. In Magic Wand mode, this is the size of the starting spot — it can still grow much bigger from there.</dd>
-          <dt>Softness (Brush mode)</dt>
-          <dd>How feathered the brush edge is. 0% is a hard-edged cut/copy; higher values fade out gradually, which blends better with soft/blurry edges like hair or fur.</dd>
-          <dt>Magic wand tolerance (Magic Wand mode)</dt>
-          <dd>How different two neighboring pixels can be and still count as "the same area." Low tolerance only spreads through near-identical color (safer, stays inside real edges/outlines). High tolerance spreads more freely across shading and gradients, but risks leaking past soft or anti-aliased edges into unrelated same-color areas.</dd>
-        </dl>
-      </details>
-
-      <button id="resetBtn">Reset to AI Result</button>
-    </section>
-
-    <section class="panel" id="boxSelectPanel" hidden>
-      <h2>4. Box Select</h2>
-      <p class="hint" id="boxSelectHint">Drag a box around an object for an AI-precise selection. Click to add a point, Shift+Click to remove one, then Apply. Uses the Erase/Restore choice above.</p>
-
-      <label class="checkbox-row">
-        <input type="checkbox" id="samIsolateCheckbox">
-        Keep only this, erase everything else
-      </label>
-
-      <details class="explain">
-        <summary>How does this work?</summary>
-        <dl>
-          <dt>What it is</dt>
-          <dd>A second, separate AI model (SlimSAM) that picks out one object at a time by its actual shape, not just its color -- useful where Magic Wand grabs too much or too little because the object doesn't have flat, uniform color. You can use it before "Remove Background" too, as a manual alternative way to cut out your subject.</dd>
-          <dt>Drag a box</dt>
-          <dd>Draw a rough box around the object. The AI finds its precise edges inside that box and shows the result as a highlighted preview -- nothing is applied to the image yet.</dd>
-          <dt>Refine with points</dt>
-          <dd>Click inside the highlighted area (or just outside it) to add a point that should be included; Shift+click to add a point that should be excluded. Each click quickly re-runs just the refinement step, not the whole analysis, so it stays responsive. Dragging a new box starts a fresh selection and clears previous points.</dd>
-          <dt>Move</dt>
-          <dd>Once a selection is highlighted, drag from inside it (instead of dragging a new box) to pick it up and reposition it -- a dim red outline marks where it's moving from. Nothing is applied to the image until you hit Apply.</dd>
-          <dt>Keep only this</dt>
-          <dd>Check this box before Apply to erase everything on the canvas except the current selection, instead of just erasing/restoring the selection itself. Combine it with Move to cut an object out and place it precisely.</dd>
-          <dt>Apply / Cancel</dt>
-          <dd>Apply writes the current selection into the image -- using Erase or Restore above, or "Keep only this" if checked. Cancel discards the selection with no changes made. Either way it's a single undo-able step.</dd>
-          <dt>First use</dt>
-          <dd>This model is only downloaded the first time you click "Start Box Select" (a small one-time download, shown in the progress bar below) -- it's not part of the initial page load or Remove Background.</dd>
-        </dl>
-      </details>
-
-      <button id="boxSelectToolBtn">Start Box Select</button>
-      <div class="progress-wrap" id="samProgressWrap" hidden>
-        <div class="progress-bar" id="samProgressBar"></div>
+        <details class="explain">
+          <summary>What do these mean?</summary>
+          <dl>
+            <dt>Erase / Restore</dt>
+            <dd>Erase paints transparent; Restore brings pixels back from the original image. Both work in either Brush or Magic Wand mode.</dd>
+            <dt>Brush mode</dt>
+            <dd>Paints exactly where you drag, nothing more. Good for freehand touch-ups, or for precise spots where Magic Wand grabs too much (e.g. two same-color areas that turn out to be touching, like a skirt and shirt of the same white).</dd>
+            <dt>Magic Wand mode</dt>
+            <dd>Click once and it grows through the whole connected area of similar color, stopping at outlines. Great for flat-color art — but if two parts of the subject share a color AND touch with no outline between them, it'll follow that connection further than you want. If that happens, undo and switch to Brush mode, or lower the tolerance.</dd>
+            <dt>Brush size</dt>
+            <dd>How big an area each click/drag touches. In Magic Wand mode, this is the size of the starting spot — it can still grow much bigger from there.</dd>
+            <dt>Softness (Brush mode)</dt>
+            <dd>How feathered the brush edge is. 0% is a hard-edged cut/copy; higher values fade out gradually, which blends better with soft/blurry edges like hair or fur.</dd>
+            <dt>Magic wand tolerance (Magic Wand mode)</dt>
+            <dd>How different two neighboring pixels can be and still count as "the same area." Low tolerance only spreads through near-identical color (safer, stays inside real edges/outlines). High tolerance spreads more freely across shading and gradients, but risks leaking past soft or anti-aliased edges into unrelated same-color areas.</dd>
+          </dl>
+        </details>
       </div>
-      <div class="btn-row" id="boxSelectActions" hidden>
-        <button id="samApplyBtn" class="primary">Apply</button>
-        <button id="samCancelBtn">Cancel</button>
+
+      <div id="boxSelectControls" hidden>
+        <p class="hint" id="boxSelectHint">Drag a box around an object for an AI-precise selection. Click to add a point, Shift+Click to remove one, then Apply.</p>
+
+        <label class="checkbox-row">
+          <input type="checkbox" id="samIsolateCheckbox">
+          Keep only this, erase everything else
+        </label>
+
+        <details class="explain">
+          <summary>How does this work?</summary>
+          <dl>
+            <dt>What it is</dt>
+            <dd>An AI model (SlimSAM) that picks out one object at a time by its actual shape, not just its color -- useful where Magic Wand grabs too much or too little because the object doesn't have flat, uniform color. Works on a fresh photo right away, no other step needed first.</dd>
+            <dt>Drag a box</dt>
+            <dd>Draw a rough box around the object. The AI finds its precise edges inside that box and shows the result as a highlighted preview -- nothing is applied to the image yet.</dd>
+            <dt>Refine with points</dt>
+            <dd>Click inside the highlighted area (or just outside it) to add a point that should be included; Shift+click to add a point that should be excluded. Each click quickly re-runs just the refinement step, not the whole analysis, so it stays responsive. Dragging a new box starts a fresh selection and clears previous points.</dd>
+            <dt>Move</dt>
+            <dd>Once a selection is highlighted, drag from inside it (instead of dragging a new box) to pick it up and reposition it -- a dim red outline marks where it's moving from. Nothing is applied to the image until you hit Apply.</dd>
+            <dt>Keep only this</dt>
+            <dd>Check this box before Apply to erase everything on the canvas except the current selection, instead of just erasing/restoring the selection itself. Combine it with Move to cut an object out and place it precisely.</dd>
+            <dt>Apply / Cancel</dt>
+            <dd>Apply writes the current selection into the image -- using Erase or Restore above, or "Keep only this" if checked. Cancel discards the selection with no changes made. Either way it's a single undo-able step.</dd>
+            <dt>First use</dt>
+            <dd>This model is only downloaded the first time you click "Box Select" (a small one-time download, shown in the progress bar below) -- not part of the initial page load.</dd>
+          </dl>
+        </details>
+
+        <div class="progress-wrap" id="samProgressWrap" hidden>
+          <div class="progress-bar" id="samProgressBar"></div>
+        </div>
+        <div class="btn-row" id="boxSelectActions" hidden>
+          <button id="samApplyBtn" class="primary">Apply</button>
+          <button id="samCancelBtn">Cancel</button>
+        </div>
       </div>
+
+      <div id="moveLayerControls" hidden>
+        <p class="hint">Drag inside the dashed box to move the active layer, or drag its corner handle to resize it. Changes apply immediately -- no separate Apply step.</p>
+      </div>
+
+      <button id="resetBtn">Reset Layer</button>
     </section>
 
     <section class="panel" id="exportPanel" hidden>
-      <h2>5. Export</h2>
+      <h2>3. Export</h2>
       <button id="downloadBtn" class="primary">Download PNG</button>
       <button id="newImageBtn">Start Over With New Image</button>
     </section>
@@ -159,6 +156,56 @@
     </div>
     <img class="fumo-mascot" src="icons/fumo.png" alt="">
   </section>
+
+  <aside class="layers-sidebar" id="layersPanel" hidden>
+    <section class="panel">
+      <h2>Layers</h2>
+      <p class="hint">Drag in another photo, or add text, to layer it into the image. Click a layer to make it active -- the Tools panel applies to whichever layer is active. Drag a layer's handle to reorder it, over or under the others.</p>
+      <div id="layerList"></div>
+      <label class="file-btn">
+        + Add Photo Layer
+        <input type="file" id="addLayerInput" accept="image/*" hidden>
+      </label>
+      <button id="addTextBtn">+ Add Text</button>
+
+      <div id="addTextForm" hidden>
+        <label class="slider-label">Text</label>
+        <input type="text" id="textContentInput" placeholder="Your text here" class="text-input">
+
+        <label class="slider-label">Font <span id="textFontSizeVal">64</span>px</label>
+        <input type="range" id="textFontSize" min="12" max="200" value="64">
+
+        <label class="slider-label">Color</label>
+        <input type="color" id="textColorInput" value="#ffffff" class="color-input">
+
+        <label class="slider-label">Font family</label>
+        <select id="textFontFamily" class="text-input">
+          <option value="Arial, sans-serif">Arial</option>
+          <option value="'Arial Black', sans-serif">Arial Black</option>
+          <option value="Helvetica, sans-serif">Helvetica</option>
+          <option value="'Segoe UI', sans-serif">Segoe UI</option>
+          <option value="Verdana, sans-serif">Verdana</option>
+          <option value="Tahoma, sans-serif">Tahoma</option>
+          <option value="'Trebuchet MS', sans-serif">Trebuchet MS</option>
+          <option value="Impact, sans-serif">Impact</option>
+          <option value="Georgia, serif">Georgia</option>
+          <option value="'Times New Roman', serif">Times New Roman</option>
+          <option value="Palatino, serif">Palatino</option>
+          <option value="Garamond, serif">Garamond</option>
+          <option value="'Courier New', monospace">Courier New</option>
+          <option value="Consolas, monospace">Consolas</option>
+          <option value="'Comic Sans MS', cursive">Comic Sans</option>
+          <option value="'Brush Script MT', cursive">Brush Script</option>
+          <option value="Papyrus, fantasy">Papyrus</option>
+        </select>
+
+        <div class="btn-row">
+          <button id="addTextConfirmBtn" class="primary">Add</button>
+          <button id="addTextCancelBtn">Cancel</button>
+        </div>
+      </div>
+    </section>
+  </aside>
 </main>
 
 <div class="credit-badge">

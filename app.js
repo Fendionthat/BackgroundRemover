@@ -1,5 +1,3 @@
-import { removeBackground } from "./vendor/background-removal.bundle.mjs";
-
 const MAX_DIM = 1600;
 const UNDO_LIMIT = 15;
 // The scene is a generously-sized, fixed working area -- not just "the size
@@ -8,12 +6,8 @@ const UNDO_LIMIT = 15;
 const SCENE_SIZE = 1600;
 
 const fileInput = document.getElementById("fileInput");
-const removeBgBtn = document.getElementById("removeBgBtn");
-const progressWrap = document.getElementById("progressWrap");
-const progressBar = document.getElementById("progressBar");
 const toolPanel = document.getElementById("toolPanel");
 const exportPanel = document.getElementById("exportPanel");
-const boxSelectPanel = document.getElementById("boxSelectPanel");
 const boxSelectToolBtn = document.getElementById("boxSelectToolBtn");
 const samProgressWrap = document.getElementById("samProgressWrap");
 const samProgressBar = document.getElementById("samProgressBar");
@@ -30,10 +24,22 @@ const addLayerInput = document.getElementById("addLayerInput");
 const layerTransformBtn = document.getElementById("layerTransformBtn");
 const layerOverlay = document.getElementById("layerOverlay");
 const layerCtx = layerOverlay.getContext("2d");
+const addTextBtn = document.getElementById("addTextBtn");
+const addTextForm = document.getElementById("addTextForm");
+const textContentInput = document.getElementById("textContentInput");
+const textFontSize = document.getElementById("textFontSize");
+const textFontSizeVal = document.getElementById("textFontSizeVal");
+const textColorInput = document.getElementById("textColorInput");
+const textFontFamily = document.getElementById("textFontFamily");
+const addTextConfirmBtn = document.getElementById("addTextConfirmBtn");
+const addTextCancelBtn = document.getElementById("addTextCancelBtn");
 const eraseToolBtn = document.getElementById("eraseToolBtn");
 const restoreToolBtn = document.getElementById("restoreToolBtn");
 const brushModeBtn = document.getElementById("brushModeBtn");
 const magicModeBtn = document.getElementById("magicModeBtn");
+const brushControls = document.getElementById("brushControls");
+const boxSelectControls = document.getElementById("boxSelectControls");
+const moveLayerControls = document.getElementById("moveLayerControls");
 const toolHint = document.getElementById("toolHint");
 const softnessRow = document.getElementById("softnessRow");
 const toleranceRow = document.getElementById("toleranceRow");
@@ -54,6 +60,7 @@ const zoomIndicator = document.getElementById("zoomIndicator");
 const dropzone = document.getElementById("dropzone");
 const brushCursor = document.getElementById("brushCursor");
 const statusEl = document.getElementById("status");
+const themeColorInput = document.getElementById("themeColorInput");
 
 // ---------- Scene (the one real, visible <canvas>) ----------
 //
@@ -70,8 +77,8 @@ const ctxScene = sceneCanvas.getContext("2d", { willReadFrequently: true });
 // "original" source + flood-fill/undo/SAM state). `workingCanvas`/
 // `ctxWorking`/`originalCanvas`/etc. below are NOT the scene -- they're a
 // reassignable "view" onto whichever layer is currently active, so every
-// existing tool (brush, flood fill, Remove Background, Box Select, undo/
-// redo) keeps reading/writing those exact names without any logic changes;
+// existing tool (brush, flood fill, Box Select, undo/redo) keeps reading/
+// writing those exact names without any logic changes;
 // they just now mean "the active layer's pixels" instead of "the one photo."
 let layers = [];
 let activeLayerIndex = -1;
@@ -81,18 +88,23 @@ function activeLayer() {
   return layers[activeLayerIndex];
 }
 
-function createLayerFromBitmap(bitmap, width, height, name) {
+// Shared layer constructor -- takes any already-drawn source canvas, so both
+// photo layers and text layers (see createTextLayer below) build the exact
+// same Layer shape and get every existing capability (move/resize/reorder/
+// delete/undo/touch-up/Box Select) for free.
+function createLayerFromCanvas(sourceCanvas, name, opts = {}) {
+  const width = sourceCanvas.width, height = sourceCanvas.height;
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(bitmap, 0, 0, width, height);
+  ctx.drawImage(sourceCanvas, 0, 0);
 
   const oCanvas = document.createElement("canvas");
   oCanvas.width = width;
   oCanvas.height = height;
   const oCtx = oCanvas.getContext("2d", { willReadFrequently: true });
-  oCtx.drawImage(bitmap, 0, 0, width, height);
+  oCtx.drawImage(sourceCanvas, 0, 0);
   const oImageData = oCtx.getImageData(0, 0, width, height);
 
   return {
@@ -105,8 +117,8 @@ function createLayerFromBitmap(bitmap, width, height, name) {
     originalImageData: oImageData,
     fillVisited: new Int32Array(width * height).fill(-1),
     fillGen: 0,
-    baselineImageData: null,
-    hasResult: false,
+    baselineImageData: opts.hasResult ? ctx.getImageData(0, 0, width, height) : null,
+    hasResult: !!opts.hasResult,
     undoStack: [],
     redoStack: [],
     samImageProcessed: null,
@@ -115,6 +127,37 @@ function createLayerFromBitmap(bitmap, width, height, name) {
     y: 0,
     scale: 1,
   };
+}
+
+function createLayerFromBitmap(bitmap, width, height, name) {
+  const tmp = document.createElement("canvas");
+  tmp.width = width;
+  tmp.height = height;
+  tmp.getContext("2d").drawImage(bitmap, 0, 0, width, height);
+  return createLayerFromCanvas(tmp, name);
+}
+
+// Unlike a photo, text has no separate "AI extraction" step before it's
+// touch-up-ready -- it's rendered final at creation, so hasResult/
+// baselineImageData are set immediately.
+function createTextLayer(text, { fontSize, color, fontFamily }) {
+  const measureCtx = document.createElement("canvas").getContext("2d");
+  measureCtx.font = `${fontSize}px ${fontFamily}`;
+  const metrics = measureCtx.measureText(text);
+  const padding = Math.ceil(fontSize * 0.3);
+  const width = Math.max(1, Math.ceil(metrics.width) + padding * 2);
+  const height = Math.max(1, Math.ceil(fontSize * 1.3));
+
+  const tmp = document.createElement("canvas");
+  tmp.width = width;
+  tmp.height = height;
+  const tctx = tmp.getContext("2d");
+  tctx.font = `${fontSize}px ${fontFamily}`;
+  tctx.fillStyle = color;
+  tctx.textBaseline = "middle";
+  tctx.fillText(text, padding, height / 2);
+
+  return createLayerFromCanvas(tmp, text.slice(0, 24) || "Text", { hasResult: true });
 }
 
 // Reassignable "active layer view" -- see comment above.
@@ -177,7 +220,6 @@ function renderComposite() {
 function refreshPanels() {
   const any = layers.length > 0;
   layersPanel.hidden = !any;
-  boxSelectPanel.hidden = !any;
   exportPanel.hidden = !any;
   toolPanel.hidden = !any;
   updateBoxSelectHint();
@@ -270,29 +312,24 @@ async function loadImageFile(file) {
   hasImage = true;
   if (activeTool === "boxSelect") deactivateBoxSelect();
   dropzone.style.display = "none";
-  removeBgBtn.disabled = false;
   refreshPanels();
   renderLayerList();
   renderComposite();
   resetZoom();
-  setStatus(`Loaded image (${width}×${height}). Click "Remove Background" when ready.`);
+  setStatus(`Loaded image (${width}×${height}). Pick a tool below to start.`);
 }
 
 // Adds a photo as a new layer on top of whatever's already there, instead of
 // replacing it -- the scene's own size (set by the first layer) never
 // changes; later layers are just positioned/scaled within it.
-async function addLayer(file) {
-  const bitmap = await createImageBitmap(file);
-  let { width, height } = bitmap;
-  const scale = Math.min(1, MAX_DIM / Math.max(width, height));
-  width = Math.round(width * scale);
-  height = Math.round(height * scale);
-
-  const layer = createLayerFromBitmap(bitmap, width, height, `Layer ${layers.length + 1}`);
-  const fitScale = Math.min(1, (sceneCanvas.width * 0.8) / width, (sceneCanvas.height * 0.8) / height);
+// Positions a freshly-created layer centered and fit within 80% of the
+// scene, then makes it the active layer and refreshes every dependent UI
+// bit -- shared by both "add a photo" and "add text".
+function pushNewLayer(layer) {
+  const fitScale = Math.min(1, (sceneCanvas.width * 0.8) / layer.canvas.width, (sceneCanvas.height * 0.8) / layer.canvas.height);
   layer.scale = fitScale;
-  layer.x = (sceneCanvas.width - width * fitScale) / 2;
-  layer.y = (sceneCanvas.height - height * fitScale) / 2;
+  layer.x = (sceneCanvas.width - layer.canvas.width * fitScale) / 2;
+  layer.y = (sceneCanvas.height - layer.canvas.height * fitScale) / 2;
 
   saveActiveLayerGlobals();
   layers.push(layer);
@@ -305,6 +342,17 @@ async function addLayer(file) {
   renderLayerList();
   renderComposite();
   setStatus(`Added "${layer.name}" as a new layer.`);
+}
+
+async function addLayer(file) {
+  const bitmap = await createImageBitmap(file);
+  let { width, height } = bitmap;
+  const scale = Math.min(1, MAX_DIM / Math.max(width, height));
+  width = Math.round(width * scale);
+  height = Math.round(height * scale);
+
+  const layer = createLayerFromBitmap(bitmap, width, height, `Layer ${layers.length + 1}`);
+  pushNewLayer(layer);
 }
 
 function loadOrAddImage(file) {
@@ -323,6 +371,38 @@ fileInput.addEventListener("change", (e) => {
 addLayerInput.addEventListener("change", (e) => {
   const file = e.target.files[0];
   if (file) loadOrAddImage(file);
+});
+
+textFontSize.addEventListener("input", () => {
+  textFontSizeVal.textContent = textFontSize.value;
+});
+
+addTextBtn.addEventListener("click", () => {
+  addTextForm.hidden = false;
+  addTextBtn.hidden = true;
+  textContentInput.value = "";
+  textContentInput.focus();
+});
+
+addTextCancelBtn.addEventListener("click", () => {
+  addTextForm.hidden = true;
+  addTextBtn.hidden = false;
+});
+
+addTextConfirmBtn.addEventListener("click", () => {
+  const text = textContentInput.value.trim();
+  if (!text) {
+    textContentInput.focus();
+    return;
+  }
+  const layer = createTextLayer(text, {
+    fontSize: Number(textFontSize.value),
+    color: textColorInput.value,
+    fontFamily: textFontFamily.value,
+  });
+  pushNewLayer(layer);
+  addTextForm.hidden = true;
+  addTextBtn.hidden = false;
 });
 
 ["dragenter", "dragover"].forEach((evt) =>
@@ -357,17 +437,15 @@ function setActiveLayer(index) {
   setStatus(
     hasResult
       ? 'Pick Erase or Restore, then Brush (precise) or Magic Wand (click a whole same-color area) below.'
-      : `"${activeLayer().name}" selected. Click "Remove Background" or "Start Box Select" to cut out its subject.`
+      : `"${activeLayer().name}" selected. Pick a tool below to start.`
   );
 }
 
-function reorderLayer(index, direction) {
-  const target = index + direction;
-  if (target < 0 || target >= layers.length) return;
+function moveLayerTo(fromIndex, toIndex) {
+  if (fromIndex === toIndex || fromIndex < 0 || fromIndex >= layers.length) return;
   const activeId = activeLayer().id;
-  const tmp = layers[index];
-  layers[index] = layers[target];
-  layers[target] = tmp;
+  const [moved] = layers.splice(fromIndex, 1);
+  layers.splice(toIndex, 0, moved);
   activeLayerIndex = layers.findIndex((L) => L.id === activeId);
   renderLayerList();
   renderComposite();
@@ -402,6 +480,22 @@ function renderLayerList() {
     const row = document.createElement("div");
     row.className = "layer-row" + (i === activeLayerIndex ? " active" : "");
 
+    const handle = document.createElement("span");
+    handle.className = "layer-handle";
+    handle.textContent = "⠿";
+    handle.title = "Drag to reorder";
+    handle.draggable = true;
+    handle.addEventListener("dragstart", (e) => {
+      e.stopPropagation();
+      e.dataTransfer.setData("text/plain", String(i));
+      e.dataTransfer.effectAllowed = "move";
+      row.classList.add("dragging");
+    });
+    handle.addEventListener("dragend", () => {
+      row.classList.remove("dragging");
+    });
+    row.appendChild(handle);
+
     const thumb = document.createElement("canvas");
     thumb.width = 36;
     thumb.height = 36;
@@ -419,28 +513,6 @@ function renderLayerList() {
     const btns = document.createElement("div");
     btns.className = "layer-btns";
 
-    const upBtn = document.createElement("button");
-    upBtn.type = "button";
-    upBtn.textContent = "▲";
-    upBtn.title = "Bring forward";
-    upBtn.disabled = i === layers.length - 1;
-    upBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      reorderLayer(i, 1);
-    });
-    btns.appendChild(upBtn);
-
-    const downBtn = document.createElement("button");
-    downBtn.type = "button";
-    downBtn.textContent = "▼";
-    downBtn.title = "Send backward";
-    downBtn.disabled = i === 0;
-    downBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      reorderLayer(i, -1);
-    });
-    btns.appendChild(downBtn);
-
     const delBtn = document.createElement("button");
     delBtn.type = "button";
     delBtn.textContent = "🗑";
@@ -453,6 +525,22 @@ function renderLayerList() {
 
     row.appendChild(btns);
     row.addEventListener("click", () => setActiveLayer(i));
+
+    row.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      row.classList.add("drag-over");
+    });
+    row.addEventListener("dragleave", () => {
+      row.classList.remove("drag-over");
+    });
+    row.addEventListener("drop", (e) => {
+      e.preventDefault();
+      row.classList.remove("drag-over");
+      const fromIndex = Number(e.dataTransfer.getData("text/plain"));
+      moveLayerTo(fromIndex, i);
+    });
+
     layerList.appendChild(row);
   }
 }
@@ -480,7 +568,6 @@ function resetAllLayers() {
   if (activeTool === "boxSelect") deactivateBoxSelect();
   if (activeTool === "layerTransform") deactivateLayerTransform();
   dropzone.style.display = "flex";
-  removeBgBtn.disabled = true;
   ctxScene.clearRect(0, 0, sceneCanvas.width, sceneCanvas.height);
   sceneCanvas.style.width = "";
   sceneCanvas.style.height = "";
@@ -491,60 +578,6 @@ function resetAllLayers() {
   setStatus("Choose an image to get started.");
 }
 
-// ---------- Background removal ----------
-
-removeBgBtn.addEventListener("click", async () => {
-  if (!hasImage) return;
-  removeBgBtn.disabled = true;
-  fileInput.disabled = true;
-  progressWrap.hidden = false;
-  progressBar.style.width = "0%";
-  setStatus("Downloading model & removing background… (first run may take a bit)");
-
-  try {
-    const sourceBlob = await new Promise((resolve) =>
-      originalCanvas.toBlob(resolve, "image/png")
-    );
-
-    const resultBlob = await removeBackground(sourceBlob, {
-      publicPath: new URL("./vendor/model-data/", import.meta.url).toString(),
-      // "isnet" is the full-precision model (higher quality than the
-      // library's smaller/faster default, "isnet_fp16"). Only "isnet" is
-      // vendored in vendor/model-data/ -- switching models means fetching
-      // that model's chunks too (see the README).
-      model: "isnet",
-      progress: (key, current, total) => {
-        if (total) {
-          const pct = Math.round((current / total) * 100);
-          progressBar.style.width = pct + "%";
-        }
-      },
-    });
-
-    const bitmap = await createImageBitmap(resultBlob);
-    ctxWorking.clearRect(0, 0, workingCanvas.width, workingCanvas.height);
-    ctxWorking.drawImage(bitmap, 0, 0, workingCanvas.width, workingCanvas.height);
-
-    baselineImageData = ctxWorking.getImageData(0, 0, workingCanvas.width, workingCanvas.height);
-    undoStack.length = 0;
-    redoStack.length = 0;
-    hasResult = true;
-    saveActiveLayerGlobals();
-    refreshPanels();
-    renderLayerList();
-    renderComposite();
-    applyZoom();
-    setStatus('Background removed. Pick Erase or Restore, then Brush (precise) or Magic Wand (click a whole same-color area) below.');
-  } catch (err) {
-    console.error(err);
-    setStatus("Something went wrong removing the background: " + err.message);
-  } finally {
-    removeBgBtn.disabled = false;
-    fileInput.disabled = false;
-    progressWrap.hidden = true;
-  }
-});
-
 // ---------- Tools ----------
 
 const TOOL_HINTS = {
@@ -554,31 +587,92 @@ const TOOL_HINTS = {
   "restore-magic": "Magic Restore: click an erased area to bring back the whole connected same-color region from the original image.",
 };
 
-function updateToolUI() {
+// Single source of truth for "which of the 4 tools is active" -- merges
+// what used to be two separate, confusingly-related states (magicMode, and
+// activeTool's boxSelect/layerTransform values) into one selector so there's
+// exactly one row of buttons to look at, instead of tools scattered across
+// panels with Box Select silently reading Erase/Restore from elsewhere.
+function primaryTool() {
+  if (activeTool === "boxSelect") return "box";
+  if (activeTool === "layerTransform") return "move";
+  return magicMode ? "wand" : "brush";
+}
+
+function updatePrimaryToolUI() {
+  const primary = primaryTool();
+
   eraseToolBtn.classList.toggle("active", currentTool === "erase");
   restoreToolBtn.classList.toggle("active", currentTool === "restore");
-  brushModeBtn.classList.toggle("active", !magicMode);
-  magicModeBtn.classList.toggle("active", magicMode);
-  softnessRow.hidden = magicMode;
-  softnessInput.hidden = magicMode;
-  toleranceRow.hidden = !magicMode;
-  toleranceInput.hidden = !magicMode;
-  toolHint.textContent = TOOL_HINTS[`${currentTool}-${magicMode ? "magic" : "brush"}`];
+  brushModeBtn.classList.toggle("active", primary === "brush");
+  magicModeBtn.classList.toggle("active", primary === "wand");
+  boxSelectToolBtn.classList.toggle("active", primary === "box");
+  layerTransformBtn.classList.toggle("active", primary === "move");
+
+  const isBrushOrWand = primary === "brush" || primary === "wand";
+  brushControls.hidden = !isBrushOrWand;
+  boxSelectControls.hidden = primary !== "box";
+  moveLayerControls.hidden = primary !== "move";
+  toolHint.hidden = !isBrushOrWand;
+
+  softnessRow.hidden = primary !== "brush";
+  softnessInput.hidden = primary !== "brush";
+  toleranceRow.hidden = primary !== "wand";
+  toleranceInput.hidden = primary !== "wand";
+
+  if (isBrushOrWand) {
+    toolHint.textContent = TOOL_HINTS[`${currentTool}-${primary === "wand" ? "magic" : "brush"}`];
+  }
 }
 
 function setTool(tool) {
   currentTool = tool;
-  updateToolUI();
+  updatePrimaryToolUI();
 }
 function setMode(magic) {
   magicMode = magic;
-  updateToolUI();
+  updatePrimaryToolUI();
 }
 eraseToolBtn.addEventListener("click", () => setTool("erase"));
 restoreToolBtn.addEventListener("click", () => setTool("restore"));
-brushModeBtn.addEventListener("click", () => setMode(false));
-magicModeBtn.addEventListener("click", () => setMode(true));
-updateToolUI();
+brushModeBtn.addEventListener("click", () => {
+  if (activeTool === "boxSelect") deactivateBoxSelect();
+  if (activeTool === "layerTransform") deactivateLayerTransform();
+  setMode(false);
+});
+magicModeBtn.addEventListener("click", () => {
+  if (activeTool === "boxSelect") deactivateBoxSelect();
+  if (activeTool === "layerTransform") deactivateLayerTransform();
+  setMode(true);
+});
+boxSelectToolBtn.addEventListener("click", async () => {
+  if (activeTool === "boxSelect") {
+    deactivateBoxSelect();
+    return;
+  }
+  if (activeTool === "layerTransform") deactivateLayerTransform();
+  if (!hasImage) return;
+  boxSelectToolBtn.disabled = true;
+  try {
+    await ensureSamLoaded();
+  } catch (err) {
+    console.error(err);
+    setStatus("Couldn't load Box Select: " + err.message);
+    samProgressWrap.hidden = true;
+    boxSelectToolBtn.disabled = false;
+    return;
+  }
+  boxSelectToolBtn.disabled = false;
+  activateBoxSelect();
+});
+layerTransformBtn.addEventListener("click", () => {
+  if (activeTool === "layerTransform") {
+    deactivateLayerTransform();
+    return;
+  }
+  if (activeTool === "boxSelect") deactivateBoxSelect();
+  activateLayerTransform();
+});
+updatePrimaryToolUI();
 
 brushSizeInput.addEventListener("input", () => {
   brushSize = Number(brushSizeInput.value);
@@ -918,8 +1012,14 @@ sceneCanvas.addEventListener("pointermove", (e) => {
 
 canvasWrap.addEventListener("scroll", () => {
   if (lastPointerEvent) updateCursorPosition(lastPointerEvent);
-  if (activeTool === "boxSelect") positionSamOverlay();
-  if (activeTool === "layerTransform") positionLayerOverlay();
+  if (activeTool === "boxSelect") {
+    positionSamOverlay();
+    drawSamOverlay();
+  }
+  if (activeTool === "layerTransform") {
+    positionLayerOverlay();
+    drawLayerOverlay();
+  }
 });
 
 window.addEventListener("pointerup", (e) => {
@@ -991,13 +1091,12 @@ function updateCursorSize() {
 
 // ---------- Box Select (SAM) ----------
 //
-// Lazy-loaded entirely on first "Start Box Select" click -- nothing here is
-// fetched during page load or Remove Background. Uses SlimSAM (a small
-// interactive segmentation model, vendored under vendor/sam/) via
-// transformers.js (vendored under vendor/transformers/), independent of the
-// isnet background-removal pipeline above. The expensive image-embedding
-// pass runs once per layer (cached on the layer itself); box drags and
-// point clicks only re-run the fast decoder.
+// Lazy-loaded entirely on first pick of the Box Select tool -- nothing here
+// is fetched during page load. Uses SlimSAM (a small interactive
+// segmentation model, vendored under vendor/sam/) via transformers.js
+// (vendored under vendor/transformers/). The expensive image-embedding pass
+// runs once per layer (cached on the layer itself); box drags and point
+// clicks only re-run the fast decoder.
 
 function ensureSamLoaded() {
   if (samModel && samProcessor) return Promise.resolve();
@@ -1064,7 +1163,7 @@ function updateBoxSelectHint() {
   if (!hasResult) samIsolateCheckbox.checked = true;
   boxSelectHint.textContent = hasResult
     ? 'Drag a box around an object for an AI-precise selection. Click to add a point, Shift+Click to remove one, then Apply.'
-    : 'Drag a box around your subject to cut it out -- an alternative to "Remove Background" above. Refine with points, then Apply.';
+    : 'Drag a box around your subject to cut it out. Refine with points, then Apply.';
 }
 
 function activateBoxSelect() {
@@ -1075,7 +1174,7 @@ function activateBoxSelect() {
   samMoveDX = 0;
   samMoveDY = 0;
   samMoveActive = false;
-  boxSelectToolBtn.textContent = "Cancel Box Select";
+  updatePrimaryToolUI();
   boxSelectActions.hidden = true;
   brushCursor.hidden = true;
   sceneCanvas.style.cursor = "crosshair";
@@ -1095,7 +1194,7 @@ function deactivateBoxSelect() {
   samMoveActive = false;
   samDragging = false;
   samDragStart = null;
-  boxSelectToolBtn.textContent = "Start Box Select";
+  updatePrimaryToolUI();
   boxSelectActions.hidden = true;
   samOverlay.hidden = true;
   sceneCanvas.style.cursor = "";
@@ -1104,26 +1203,6 @@ function deactivateBoxSelect() {
     setStatus('Pick Erase or Restore, then Brush (precise) or Magic Wand (click a whole same-color area) below.');
   }
 }
-
-boxSelectToolBtn.addEventListener("click", async () => {
-  if (activeTool === "boxSelect") {
-    deactivateBoxSelect();
-    return;
-  }
-  if (!hasImage) return;
-  boxSelectToolBtn.disabled = true;
-  try {
-    await ensureSamLoaded();
-  } catch (err) {
-    console.error(err);
-    setStatus("Couldn't load Box Select: " + err.message);
-    samProgressWrap.hidden = true;
-    boxSelectToolBtn.disabled = false;
-    return;
-  }
-  boxSelectToolBtn.disabled = false;
-  activateBoxSelect();
-});
 
 function pointInMask(x, y) {
   if (!samMask) return false;
@@ -1487,19 +1566,19 @@ function drawLayerOverlay() {
 function activateLayerTransform() {
   if (activeLayerIndex < 0) return;
   activeTool = "layerTransform";
-  layerTransformBtn.textContent = "Done Moving/Resizing";
+  updatePrimaryToolUI();
   brushCursor.hidden = true;
   sceneCanvas.style.cursor = "move";
   layerOverlay.hidden = false;
   positionLayerOverlay();
   drawLayerOverlay();
-  setStatus('Drag inside the box to move it, or the corner handle to resize. Click "Done" when finished.');
+  setStatus("Drag inside the box to move the layer, or its corner handle to resize.");
 }
 
 function deactivateLayerTransform() {
   activeTool = "touchup";
   layerDragMode = null;
-  layerTransformBtn.textContent = "Move / Resize Active Layer";
+  updatePrimaryToolUI();
   layerOverlay.hidden = true;
   sceneCanvas.style.cursor = "";
   layerCtx.clearRect(0, 0, layerOverlay.width, layerOverlay.height);
@@ -1507,15 +1586,6 @@ function deactivateLayerTransform() {
     setStatus('Pick Erase or Restore, then Brush (precise) or Magic Wand (click a whole same-color area) below.');
   }
 }
-
-layerTransformBtn.addEventListener("click", () => {
-  if (activeTool === "layerTransform") {
-    deactivateLayerTransform();
-    return;
-  }
-  if (activeTool === "boxSelect") deactivateBoxSelect();
-  activateLayerTransform();
-});
 
 // ---------- Zoom ----------
 
@@ -1539,11 +1609,26 @@ function applyZoom() {
   }
 }
 
+// Scrolls so the scene's own center (where layers are centered by default,
+// see loadImageFile/pushNewLayer) sits in the middle of the viewport. This
+// is what resetZoom used to get wrong -- it scrolled to (0,0), the scene's
+// top-left corner -- which, since the scene is deliberately padded larger
+// than any one photo, is mostly empty space. Zooming in from that corner
+// is exactly what looked like "zoom drifts to one side and layers vanish."
+function centerViewOnScene() {
+  const sceneRect = sceneCanvas.getBoundingClientRect();
+  const wrapRect = canvasWrap.getBoundingClientRect();
+  const sceneDisplayScale = (sceneRect.width / sceneCanvas.width) || 1;
+  const centerX = (sceneCanvas.width / 2) * sceneDisplayScale;
+  const centerY = (sceneCanvas.height / 2) * sceneDisplayScale;
+  canvasWrap.scrollLeft = centerX - wrapRect.width / 2;
+  canvasWrap.scrollTop = centerY - wrapRect.height / 2;
+}
+
 function resetZoom() {
   zoom = 1;
   applyZoom();
-  canvasWrap.scrollLeft = 0;
-  canvasWrap.scrollTop = 0;
+  centerViewOnScene();
 }
 
 canvasWrap.addEventListener(
@@ -1556,32 +1641,89 @@ canvasWrap.addEventListener(
     zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom * factor));
     if (zoom === oldZoom) return;
 
+    // Anchor on the *viewport's own center*, not the cursor. Cursor-anchored
+    // zoom drifts toward wherever the mouse happens to be at each tick --
+    // with the scene padded larger than any one photo/layer, that drift can
+    // walk the view into empty space over repeated zoom steps, which is
+    // exactly what reads as "zoom goes to one side and my layers vanish."
+    // Anchoring on the current view's own center is stable and predictable
+    // regardless of mouse position, and still respects wherever you've
+    // manually panned to (it's not re-centering on the scene, just staying
+    // put on whatever's already centered in view).
     const wrapRect = canvasWrap.getBoundingClientRect();
-    const anchorX = e.clientX - wrapRect.left + canvasWrap.scrollLeft;
-    const anchorY = e.clientY - wrapRect.top + canvasWrap.scrollTop;
+    const viewCenterX = wrapRect.width / 2;
+    const viewCenterY = wrapRect.height / 2;
+    const anchorX = viewCenterX + canvasWrap.scrollLeft;
+    const anchorY = viewCenterY + canvasWrap.scrollTop;
     const scaleRatio = zoom / oldZoom;
 
     applyZoom();
 
-    canvasWrap.scrollLeft = anchorX * scaleRatio - (e.clientX - wrapRect.left);
-    canvasWrap.scrollTop = anchorY * scaleRatio - (e.clientY - wrapRect.top);
+    canvasWrap.scrollLeft = anchorX * scaleRatio - viewCenterX;
+    canvasWrap.scrollTop = anchorY * scaleRatio - viewCenterY;
     updateCursorPosition(e);
+  },
+  { passive: false }
+);
+
+// The canvas-only handler above only fires while the pointer is over the
+// canvas. A pinch gesture (or Ctrl+scroll) that starts there but drifts
+// off it mid-gesture -- easy to do with a large canvas -- would otherwise
+// fall through to the browser's native page zoom, which zooms everything
+// including the sidebar and can push tool panels off-screen. Block that
+// globally regardless of where on the page it happens.
+window.addEventListener(
+  "wheel",
+  (e) => {
+    if (e.ctrlKey) e.preventDefault();
   },
   { passive: false }
 );
 
 zoomIndicator.addEventListener("click", resetZoom);
 
-// The sidebar scrolls internally so reaching lower panels never requires
+// Both sidebars scroll internally so reaching lower panels never requires
 // scrolling the whole page -- max-height alone can't account for the
 // topbar's actual height (it varies with content/viewport), so this sizes
-// it to exactly what's left below wherever the sidebar naturally sits.
-const sidebarEl = document.querySelector(".sidebar");
+// them to exactly what's left below wherever they naturally sit.
+const sidebarEls = document.querySelectorAll(".sidebar, .layers-sidebar");
 function fitSidebarHeight() {
-  const top = sidebarEl.getBoundingClientRect().top;
-  sidebarEl.style.maxHeight = Math.max(200, window.innerHeight - top - 20) + "px";
+  sidebarEls.forEach((el) => {
+    const top = el.getBoundingClientRect().top;
+    el.style.maxHeight = Math.max(200, window.innerHeight - top - 20) + "px";
+  });
 }
 fitSidebarHeight();
+
+// ---------- Theme color ----------
+//
+// One picker drives the whole app's accent color (buttons, active states,
+// highlights) via the existing --accent/--accent-hover CSS custom
+// properties every style already reads from -- no per-button styling
+// needed. Persisted so it survives a reload.
+
+function lightenHex(hex, amount) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const mix = (c) => Math.round(c + (255 - c) * amount);
+  return "#" + [mix(r), mix(g), mix(b)].map((v) => v.toString(16).padStart(2, "0")).join("");
+}
+
+function applyThemeColor(hex) {
+  document.documentElement.style.setProperty("--accent", hex);
+  document.documentElement.style.setProperty("--accent-hover", lightenHex(hex, 0.4));
+}
+
+const THEME_COLOR_KEY = "cirnoBrThemeColor";
+const savedThemeColor = localStorage.getItem(THEME_COLOR_KEY);
+if (savedThemeColor) {
+  themeColorInput.value = savedThemeColor;
+  applyThemeColor(savedThemeColor);
+}
+themeColorInput.addEventListener("input", () => {
+  applyThemeColor(themeColorInput.value);
+  localStorage.setItem(THEME_COLOR_KEY, themeColorInput.value);
+});
 
 window.addEventListener("resize", () => {
   updateCursorSize();
